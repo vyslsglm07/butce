@@ -11,6 +11,8 @@
   v1.4  Bütçe limitleri: aylık toplam + kategori bazlı limit, aşınca uyarı
         NOT: Bu sürüm için Supabase'de "limitler" tablosu oluşturuldu.
   v1.5  Arama (açıklama/kategori) + Yıl özeti penceresi (Supabase değişikliği yok)
+        v1.5.1  Yıl özeti penceresi boş görünme hatası düzeltildi
+        v1.5.2  Yıl özeti penceresi kapatma (×) hatası düzeltildi
 -->
 <html lang="tr">
 <head>
@@ -96,7 +98,8 @@
     color:var(--murekkep);cursor:pointer}
   .yil-btn:hover{background:var(--murekkep);color:#fff;border-color:var(--murekkep)}
   .modal-katman{position:fixed;inset:0;background:rgba(22,24,29,.5);z-index:50;
-    display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+    display:none;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+  .modal-katman.acik{display:flex}
   .modal{background:var(--kagit);border-radius:6px;padding:22px;max-width:560px;width:100%;
     box-shadow:0 20px 60px rgba(0,0,0,.3)}
   .modal-bas{display:flex;align-items:center;justify-content:space-between;gap:12px}
@@ -200,7 +203,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v1.5</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v1.5.2</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -298,7 +301,7 @@
 </div>
 
 <!-- Yıl özeti penceresi -->
-<div class="modal-katman" id="yilModal" hidden>
+<div class="modal-katman" id="yilModal">
   <div class="modal">
     <div class="modal-bas">
       <div class="ay-satir" style="margin:0">
@@ -685,48 +688,34 @@ function limitPaneliCiz(){
    YIL ÖZETİ
    ═══════════════════════════════════════════════════════════════ */
 let seciliYil = new Date().getFullYear();
-let yilGrafik = null;
+let yilGrafikChart = null;
 
 function yilOzetiniAc(){
-  document.getElementById('yilModal').hidden = false;
-  yilOzetiniCiz();
+  document.getElementById('yilModal').classList.add('acik');
+  // Modal ekranda yerini alsın, sonra çiz (grafik canvas'ının boyutu oluşsun).
+  requestAnimationFrame(() => yilOzetiniCiz());
 }
 function yilOzetiniKapat(){
-  document.getElementById('yilModal').hidden = true;
+  document.getElementById('yilModal').classList.remove('acik');
 }
 
 function yilOzetiniCiz(){
-  const yilKayitlari = kayitlar.filter(k => k.tarih.slice(0,4) === String(seciliYil));
+  const yil = String(seciliYil);
+  const yilKayitlari = kayitlar.filter(k => (k.tarih || '').slice(0,4) === yil);
   const giderler = yilKayitlari.filter(k => (k.tur||'gider') === 'gider');
   const gelirler = yilKayitlari.filter(k => k.tur === 'gelir');
   const gider = giderler.reduce((t,k) => t+k.tutar, 0);
   const gelir = gelirler.reduce((t,k) => t+k.tutar, 0);
   const kalan = gelir - gider;
 
+  // 1) Metin içerikleri — bunlar her koşulda dolsun.
   document.getElementById('yilBaslik').textContent = seciliYil + ' özeti';
   document.getElementById('yilOzet').innerHTML =
     `<span>Gelir <b class="pozitif">${para(gelir)}</b></span>
      <span>Gider <b>${para(gider)}</b></span>
      <span>Kalan <b class="${kalan >= 0 ? 'pozitif' : 'negatif'}">${para(kalan)}</b></span>`;
 
-  // 12 aylık gider grafiği
-  const aylikGider = [];
-  for (let a=1; a<=12; a++){
-    const ay2 = `${seciliYil}-${String(a).padStart(2,'0')}`;
-    aylikGider.push(giderler.filter(k => ayOf(k.tarih)===ay2).reduce((t,k)=>t+k.tutar,0));
-  }
-  yilGrafik?.destroy();
-  yilGrafik = new Chart(document.getElementById('yilGrafik'), {
-    type:'bar',
-    data:{ labels: AYLAR.map(a => a.slice(0,3)),
-           datasets:[{ data: aylikGider, backgroundColor:'#16181D', borderRadius:2 }] },
-    options:{ plugins:{ legend:{display:false},
-                tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } },
-              scales:{ y:{ display:false }, x:{ grid:{display:false},
-                ticks:{ font:{ size:10 } } } } }
-  });
-
-  // Yıllık kategori dağılımı
+  // 2) Yıllık kategori dağılımı
   const gecenIdler = [...new Set(giderler.map(k => k.kategori))];
   const katToplam = gecenIdler
     .map(id => ({ ...katBul(id), deger: giderler.filter(h => h.kategori===id)
@@ -739,6 +728,27 @@ function yilOzetiniCiz(){
         <span style="flex:1">${k.ad}</span>
         <b class="tutar">${para(k.deger)}</b></div>`).join('')
     : '<div class="bos" style="padding:16px">Bu yıl için gider kaydı yok.</div>';
+
+  // 3) 12 aylık gider grafiği — hataya karşı ayrı ve korumalı.
+  const aylikGider = [];
+  for (let a=1; a<=12; a++){
+    const ay2 = `${yil}-${String(a).padStart(2,'0')}`;
+    aylikGider.push(giderler.filter(k => ayOf(k.tarih)===ay2).reduce((t,k)=>t+k.tutar,0));
+  }
+  try {
+    yilGrafikChart?.destroy();
+    yilGrafikChart = new Chart(document.getElementById('yilGrafik'), {
+      type:'bar',
+      data:{ labels: AYLAR.map(a => a.slice(0,3)),
+             datasets:[{ data: aylikGider, backgroundColor:'#16181D', borderRadius:2 }] },
+      options:{ animation:false, plugins:{ legend:{display:false},
+                  tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } },
+                scales:{ y:{ display:false }, x:{ grid:{display:false},
+                  ticks:{ font:{ size:10 } } } } }
+    });
+  } catch (e) {
+    // Grafik çizilemezse en azından geri kalan içerik görünür kalsın.
+  }
 }
 
 async function kategoriEkle(){
