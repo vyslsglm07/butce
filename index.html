@@ -6,6 +6,8 @@
   v1.2  Gelir takibi: gider/gelir seçici, kalan hesabı (gelir - gider)
         NOT: Bu sürüm için Supabase'de şu komut çalıştırıldı:
         alter table harcamalar add column tur text not null default 'gider';
+  v1.3  Kendi kategorilerini yönetme (ekle/sil, varsayılanlar dahil)
+        NOT: Bu sürüm için Supabase'de "kategoriler" tablosu oluşturuldu.
 -->
 <html lang="tr">
 <head>
@@ -84,6 +86,21 @@
   .kart{background:var(--yuzey);border:1px solid var(--cizgi);border-radius:4px;padding:18px}
   .kart + .kart{margin-top:18px}
   .kart h2{font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px;margin:0 0 14px}
+  .kat-baslik{font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px;
+    cursor:pointer;list-style:none;user-select:none}
+  .kat-baslik::before{content:'▸ ';color:var(--ikincil);font-size:12px}
+  details[open] .kat-baslik::before{content:'▾ '}
+  .kat-liste{margin:14px 0 10px}
+  .kat-satir{display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--cizgi)}
+  .kat-satir:first-child{border-top:none}
+  .kat-ad{flex:1;font-size:14px}
+  .kat-sil{border:none;background:none;cursor:pointer;color:var(--ikincil);font-size:16px;padding:2px 6px}
+  .kat-sil:hover{color:var(--kirmizi)}
+  .kat-ekle{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .kat-ekle input[type="text"],.kat-ekle #katAd{flex:1;padding:9px 10px;border:1px solid var(--cizgi);
+    border-radius:3px;background:#FBFCFD;font:14px 'IBM Plex Sans',sans-serif;color:var(--murekkep)}
+  .kat-ekle input[type="color"]{width:38px;height:38px;padding:2px;border:1px solid var(--cizgi);
+    border-radius:3px;background:var(--yuzey);cursor:pointer;flex:none}
 
   .alan{margin-bottom:12px}
   .tur-secici{display:flex;gap:6px;margin-bottom:14px}
@@ -148,7 +165,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v1.2</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v1.3</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -200,6 +217,18 @@
         <h2>Son 6 ay</h2>
         <canvas id="trendGrafik" height="150"></canvas>
       </div>
+
+      <div class="kart">
+        <details>
+          <summary class="kat-baslik">Kategorileri yönet</summary>
+          <div id="katListe" class="kat-liste"></div>
+          <div class="kat-ekle">
+            <input id="katAd" placeholder="Yeni kategori adı" />
+            <input id="katRenk" type="color" value="#2F7A4E" title="Renk seç" />
+            <button class="btn" id="katEkleBtn" style="width:auto;padding:9px 14px">Ekle</button>
+          </div>
+        </details>
+      </div>
     </div>
 
     <div>
@@ -226,7 +255,7 @@
 /* ═══════════════════════════════════════════════════════════════
    1) KATEGORİLER — renkler TL banknotlarının tonlarından
    ═══════════════════════════════════════════════════════════════ */
-const KATEGORILER = [
+const VARSAYILAN_KATEGORILER = [
   { id:'market',  ad:'Market',      renk:'#2F7A4E' },
   { id:'yeme',    ad:'Yeme–İçme',   renk:'#D2762E' },
   { id:'ulasim',  ad:'Ulaşım',      renk:'#B03A2E' },
@@ -236,7 +265,11 @@ const KATEGORILER = [
   { id:'eglence', ad:'Eğlence',     renk:'#8A5A44' },
   { id:'diger',   ad:'Diğer',       renk:'#5B6472' },
 ];
-const katBul = id => KATEGORILER.find(k => k.id === id) || KATEGORILER[7];
+// Çalışma zamanı kategori listesi. Kullanıcı ekler/siler, bu değişir.
+let aktifKategoriler = [...VARSAYILAN_KATEGORILER];
+// Kategori bulunamazsa (silinmiş kategoriye bağlı eski harcama) gri "Silinmiş" göster.
+const katBul = id => aktifKategoriler.find(k => k.id === id)
+  || { id, ad:'Silinmiş', renk:'#B0B4BA' };
 
 const AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran',
                'Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
@@ -275,6 +308,18 @@ function yerelYaz(v){
 }
 function yereliTemizle(){ try { localStorage.removeItem(YEREL_ANAHTAR); } catch {} }
 
+/* Yerel kategori depo. Yoksa varsayılanları döndürür. */
+const YEREL_KAT_ANAHTAR = 'butce:kategoriler';
+function yerelKategoriOku(){
+  try {
+    const v = JSON.parse(localStorage.getItem(YEREL_KAT_ANAHTAR));
+    return Array.isArray(v) && v.length ? v : [...VARSAYILAN_KATEGORILER];
+  } catch { return [...VARSAYILAN_KATEGORILER]; }
+}
+function yerelKategoriYaz(v){
+  try { localStorage.setItem(YEREL_KAT_ANAHTAR, JSON.stringify(v)); } catch {}
+}
+
 /* ═══════════════════════════════════════════════════════════════
    4) BULUT DEPO — Supabase
    Tablo: harcamalar (SQL en altta, yorum içinde)
@@ -307,6 +352,39 @@ async function bulutGuncelle(kayit){
     .eq('id', kayit.id).select().single();
   if (error) throw error;
   return { ...data, tutar:Number(data.tutar), tur:data.tur || 'gider' };
+}
+
+/* Bulut kategori işlemleri. */
+async function bulutKategoriOku(){
+  const { data, error } = await sb.from('kategoriler')
+    .select('id, ad, renk').order('created_at', { ascending:true });
+  if (error) throw error;
+  return data;
+}
+async function bulutKategoriEkle(kat){
+  const { error } = await sb.from('kategoriler')
+    .insert({ id:kat.id, ad:kat.ad, renk:kat.renk });
+  if (error) throw error;
+}
+async function bulutKategoriSil(id){
+  const { error } = await sb.from('kategoriler').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* Kategorileri yükle. Bulutta hiç kategori yoksa (ilk kez), o anki yerel
+   kategorileri (varsayılanlar + kullanıcının eklediği) buluta taşı. */
+async function kategorileriYukle(){
+  if (bulutVar()) {
+    let bulut = await bulutKategoriOku();
+    if (bulut.length === 0) {
+      const tohum = yerelKategoriOku();               // varsayılanlar ya da yereldekiler
+      for (const k of tohum) await bulutKategoriEkle(k);
+      bulut = tohum;
+    }
+    aktifKategoriler = bulut;
+  } else {
+    aktifKategoriler = yerelKategoriOku();
+  }
 }
 
 /* İlk senkron: kullanıcı giriş yaptığında, cihazda birikmiş kayıtları hesabına taşı. */
@@ -344,20 +422,26 @@ async function baslat(){
       kullanici = oturum?.user || null;
       if (kullanici) {
         await ilkSenkron();
+        await kategorileriYukle();
         kayitlar = await bulutOku();
       } else {
+        await kategorileriYukle();
         kayitlar = yerelOku();
       }
+      kategoriSecicisiDoldur();
       ciz();
     });
 
     const { data } = await sb.auth.getSession();
     kullanici = data.session?.user || null;
+    await kategorileriYukle();
     kayitlar = kullanici ? await bulutOku() : yerelOku();
   } else {
     // Supabase bilgileri doldurulmamış → program yerel modda çalışır.
+    await kategorileriYukle();
     kayitlar = yerelOku();
   }
+  kategoriSecicisiDoldur();
   ciz();
 }
 
@@ -417,6 +501,77 @@ function turSec(tur){
   document.getElementById('turGelir').classList.toggle('aktif', tur === 'gelir');
   // Gelirde kategori seçmeye gerek yok; kategori alanını gizle.
   document.getElementById('kategoriAlan').style.display = tur === 'gelir' ? 'none' : '';
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   KATEGORİ YÖNETİMİ
+   ═══════════════════════════════════════════════════════════════ */
+/* Formdaki kategori açılır listesini aktif kategorilerle doldur. */
+function kategoriSecicisiDoldur(){
+  const sel = document.getElementById('kategori');
+  const secili = sel.value;
+  sel.innerHTML = aktifKategoriler
+    .map(k => `<option value="${k.id}">${k.ad}</option>`).join('');
+  // Önceki seçim hâlâ varsa koru.
+  if (aktifKategoriler.some(k => k.id === secili)) sel.value = secili;
+}
+
+/* Yönetim panelindeki kategori listesini çiz. */
+function kategoriPaneliCiz(){
+  const el = document.getElementById('katListe');
+  if (!el) return;
+  el.innerHTML = aktifKategoriler.map(k => `
+    <div class="kat-satir">
+      <span class="nokta" style="background:${k.renk}"></span>
+      <span class="kat-ad">${k.ad}</span>
+      <button class="kat-sil" data-id="${k.id}" aria-label="Sil" title="Kategoriyi sil">×</button>
+    </div>`).join('') || '<div class="bos" style="padding:12px">Hiç kategori yok. Aşağıdan ekle.</div>';
+  el.querySelectorAll('.kat-sil').forEach(b =>
+    b.onclick = () => kategoriSil(b.dataset.id));
+}
+
+async function kategoriEkle(){
+  const adEl = document.getElementById('katAd');
+  const renkEl = document.getElementById('katRenk');
+  const ad = adEl.value.trim();
+  if (!ad) { adEl.focus(); return; }
+
+  const kat = { id: crypto.randomUUID(), ad, renk: renkEl.value };
+  aktifKategoriler.push(kat);
+
+  if (bulutVar()) {
+    try { await bulutKategoriEkle(kat); }
+    catch { aktifKategoriler = aktifKategoriler.filter(k => k.id !== kat.id); return; }
+  } else {
+    yerelKategoriYaz(aktifKategoriler);
+  }
+
+  adEl.value = '';
+  kategoriSecicisiDoldur();
+  kategoriPaneliCiz();
+}
+
+async function kategoriSil(id){
+  // Son kategoriyi silmeye izin verme; en az bir tane kalmalı.
+  if (aktifKategoriler.length <= 1) {
+    alert('En az bir kategori kalmalı.');
+    return;
+  }
+  if (!confirm('Bu kategoriyi silmek istediğine emin misin? Ona bağlı harcamalar "Silinmiş" olarak görünür.')) return;
+
+  const yedek = aktifKategoriler;
+  aktifKategoriler = aktifKategoriler.filter(k => k.id !== id);
+
+  if (bulutVar()) {
+    try { await bulutKategoriSil(id); }
+    catch { aktifKategoriler = yedek; return; }
+  } else {
+    yerelKategoriYaz(aktifKategoriler);
+  }
+
+  kategoriSecicisiDoldur();
+  kategoriPaneliCiz();
+  ciz();
 }
 
 /* Formu düzenleme moduna geçir: seçilen kaydın değerlerini forma doldur. */
@@ -502,9 +657,11 @@ function ciz(){
   document.getElementById('toplam').textContent = para(toplam);
 
   const gunSayisi = new Set(giderler.map(k => k.tarih)).size;
-  const katToplam = KATEGORILER
-    .map(k => ({ ...k, deger: giderler.filter(h => h.kategori===k.id)
-                              .reduce((t,h) => t+h.tutar, 0) }))
+  // Harcamalarda geçen kategori id'lerine göre topla; silinmiş kategoriler de görünsün.
+  const gecenIdler = [...new Set(giderler.map(k => k.kategori))];
+  const katToplam = gecenIdler
+    .map(id => ({ ...katBul(id), deger: giderler.filter(h => h.kategori===id)
+                                        .reduce((t,h) => t+h.tutar, 0) }))
     .filter(k => k.deger > 0).sort((a,b) => b.deger - a.deger);
 
   document.getElementById('ozet').innerHTML = (ayKayitlari.length
@@ -568,6 +725,7 @@ function ciz(){
   if (!ayKayitlari.length) {
     listeEl.innerHTML = `<div class="bos"><strong>${ayEtiket(ay)} için kayıt yok</strong>
       Soldaki formdan ilk harcamanı ekle.</div>`;
+    kategoriPaneliCiz();
     return;
   }
   const gruplar = {};
@@ -592,18 +750,20 @@ function ciz(){
 
   listeEl.querySelectorAll('.sil').forEach(b => b.onclick = () => sil(b.dataset.id));
   listeEl.querySelectorAll('.duzenle').forEach(b => b.onclick = () => duzenle(b.dataset.id));
+
+  kategoriPaneliCiz();
 }
 
 /* ═══════════════════════════════════════════════════════════════
    9) BAĞLANTILAR
    ═══════════════════════════════════════════════════════════════ */
-document.getElementById('kategori').innerHTML =
-  KATEGORILER.map(k => `<option value="${k.id}">${k.ad}</option>`).join('');
 document.getElementById('tarih').value = bugun();
 document.getElementById('ekle').onclick = ekle;
 document.getElementById('vazgec').onclick = formuTemizle;
 document.getElementById('turGider').onclick = () => turSec('gider');
 document.getElementById('turGelir').onclick = () => turSec('gelir');
+document.getElementById('katEkleBtn').onclick = kategoriEkle;
+document.getElementById('katAd').addEventListener('keydown', e => e.key==='Enter' && kategoriEkle());
 document.getElementById('geri').onclick  = () => { ay = ayKaydir(ay,-1); ciz(); };
 document.getElementById('ileri').onclick = () => { ay = ayKaydir(ay, 1); ciz(); };
 ['tutar','aciklama'].forEach(id =>
@@ -650,6 +810,21 @@ create policy "kendi kayitlarini gorur"    on harcamalar for select using (auth.
 create policy "kendi kaydini ekler"        on harcamalar for insert with check (auth.uid() = user_id);
 create policy "kendi kaydini siler"        on harcamalar for delete using (auth.uid() = user_id);
 create policy "kendi kaydini gunceller"    on harcamalar for update using (auth.uid() = user_id);
+
+-- ─── v1.3: KATEGORİLER TABLOSU ───
+create table kategoriler (
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  id text not null,
+  ad text not null,
+  renk text not null,
+  created_at timestamp default now(),
+  primary key (user_id, id)
+);
+alter table kategoriler enable row level security;
+create policy "kendi kategorilerini gorur"   on kategoriler for select using (auth.uid() = user_id);
+create policy "kendi kategorisini ekler"     on kategoriler for insert with check (auth.uid() = user_id);
+create policy "kendi kategorisini siler"     on kategoriler for delete using (auth.uid() = user_id);
+create policy "kendi kategorisini gunceller" on kategoriler for update using (auth.uid() = user_id);
 -->
 </body>
 </html>
