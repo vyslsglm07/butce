@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Bütçe Defteri — Kişisel Harcama Takibi</title>
+<meta name="description" content="Harcamalarını kategorilere ayır, aylık dağılımını gör. Google hesabınla giriş yap, kayıtların her cihazdan erişilebilir olsun." />
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
+
+  :root{
+    --murekkep:#16181D; --ikincil:#6B7280; --kagit:#EDEFF2;
+    --yuzey:#FFF; --cizgi:#DDE1E6; --kirmizi:#B03A2E;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--kagit); color:var(--murekkep);
+    font-family:'IBM Plex Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
+    padding:24px 18px 60px;
+  }
+  .govde{max-width:980px;margin:0 auto}
+  .tutar{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
+  .etiket{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
+    text-transform:uppercase;color:var(--ikincil)}
+
+  /* Üst çubuk: oturum */
+  .ust{display:flex;justify-content:space-between;align-items:center;gap:12px;
+    flex-wrap:wrap;margin-bottom:22px}
+  .marka{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;font-size:17px;letter-spacing:-.02em}
+  .oturum{display:flex;align-items:center;gap:10px;font-size:13px;color:var(--ikincil)}
+  .avatar{width:26px;height:26px;border-radius:50%}
+  .gbtn{display:flex;align-items:center;gap:8px;background:var(--yuzey);
+    border:1px solid var(--cizgi);border-radius:3px;padding:8px 12px;
+    font:600 13px 'IBM Plex Sans',sans-serif;color:var(--murekkep);cursor:pointer}
+  .gbtn:hover{border-color:var(--murekkep)}
+  .baglanti{background:none;border:none;color:var(--ikincil);cursor:pointer;
+    font:13px 'IBM Plex Sans',sans-serif;text-decoration:underline}
+
+  .rozet{border-radius:3px;padding:9px 12px;font-size:13px;margin-bottom:18px}
+  .rozet.bilgi{background:#FFF;border:1px solid var(--cizgi);color:var(--ikincil)}
+  .rozet.uyari{background:#FBF1EF;border:1px solid #E4C7C2;color:#8C3325}
+
+  /* Kahraman */
+  .ay-satir{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .ok{width:30px;height:30px;border:1px solid var(--cizgi);background:var(--yuzey);
+    border-radius:3px;cursor:pointer;font-size:14px}
+  .ok:hover{background:var(--murekkep);color:#fff;border-color:var(--murekkep)}
+  .ay-ad{font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px}
+  .buyuk{font-family:'Bricolage Grotesque',sans-serif;font-weight:800;
+    font-size:clamp(38px,7vw,58px);line-height:1;letter-spacing:-.03em;
+    font-variant-numeric:tabular-nums;margin:2px 0 0}
+  .alt-bilgi{display:flex;gap:22px;flex-wrap:wrap;margin-top:10px;font-size:13px;color:var(--ikincil)}
+  .alt-bilgi b{font-family:'IBM Plex Mono',monospace;color:var(--murekkep)}
+
+  /* İmza: banknot şeridi */
+  .serit{display:flex;height:34px;border-radius:3px;overflow:hidden;margin-top:18px;
+    background:var(--yuzey);border:1px solid var(--cizgi)}
+  .dilim{transition:flex-grow .35s ease;min-width:2px;display:flex;align-items:center;
+    justify-content:center;color:#fff;font:600 10px 'IBM Plex Mono',monospace}
+  .serit-bos{display:flex;align-items:center;justify-content:center;width:100%;
+    font-size:12px;color:var(--ikincil)}
+  .anahtar{display:flex;flex-wrap:wrap;gap:12px;margin-top:10px;font-size:12px;color:var(--ikincil)}
+  .anahtar span{display:flex;align-items:center;gap:6px}
+  .nokta{width:8px;height:8px;border-radius:2px;display:inline-block}
+
+  .izgara{display:grid;grid-template-columns:330px 1fr;gap:18px;align-items:start;margin-top:26px}
+  @media(max-width:820px){.izgara{grid-template-columns:1fr}}
+
+  .kart{background:var(--yuzey);border:1px solid var(--cizgi);border-radius:4px;padding:18px}
+  .kart + .kart{margin-top:18px}
+  .kart h2{font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px;margin:0 0 14px}
+
+  .alan{margin-bottom:12px}
+  .alan label{display:block;margin-bottom:5px}
+  .alan input,.alan select{width:100%;padding:9px 10px;border:1px solid var(--cizgi);
+    border-radius:3px;background:#FBFCFD;font:14px 'IBM Plex Sans',sans-serif;color:var(--murekkep)}
+  .alan input:focus,.alan select:focus{outline:2px solid var(--murekkep);outline-offset:1px;background:#fff}
+  #tutar{font:600 20px 'IBM Plex Mono',monospace}
+  .btn{width:100%;padding:11px;border:none;border-radius:3px;background:var(--murekkep);
+    color:#fff;cursor:pointer;font:600 14px 'IBM Plex Sans',sans-serif}
+  .btn:hover{background:#000}
+  .hata{color:var(--kirmizi);font-size:12px;margin:8px 0 0}
+
+  .liste-bas{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+  .csv{background:none;border:1px solid var(--cizgi);border-radius:3px;padding:5px 10px;
+    font:12px 'IBM Plex Sans',sans-serif;color:var(--ikincil);cursor:pointer}
+  .csv:hover{color:var(--murekkep);border-color:var(--murekkep)}
+
+  .gun{font-size:12px;color:var(--ikincil);margin:16px 0 6px}
+  .satir{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--cizgi)}
+  .renk{width:3px;height:26px;border-radius:2px;flex:none}
+  .ad{flex:1;min-width:0}
+  .ad strong{display:block;font-size:14px;font-weight:500}
+  .ad small{color:var(--ikincil);font-size:12px}
+  .satir .tutar{font-size:14px;font-weight:600}
+  .sil{border:none;background:none;cursor:pointer;color:transparent;font-size:16px;padding:4px}
+  .satir:hover .sil{color:var(--ikincil)}
+  .sil:hover{color:var(--kirmizi)}
+
+  .bos{text-align:center;padding:34px 12px;color:var(--ikincil);font-size:14px}
+  .bos strong{display:block;color:var(--murekkep);margin-bottom:4px;font-size:15px}
+  .grafikler{display:grid;grid-template-columns:1fr 1fr;gap:18px;align-items:center}
+  @media(max-width:600px){.grafikler{grid-template-columns:1fr}}
+  @media(prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+</head>
+<body>
+<div class="govde">
+
+  <!-- ══════════════════════════════════════════════════════════
+       BURAYI DOLDUR — Supabase bilgileri (şablonun 7. adımı)
+       Boş bırakırsan program yine çalışır, ama kayıtlar sadece
+       bu cihazda kalır (Google girişi kapalı olur).
+       ══════════════════════════════════════════════════════════ -->
+  <script>
+    const SUPABASE_URL = '';   // https://xxxx.supabase.co
+    const SUPABASE_KEY = '';   // legacy anon key — eyJ... ile başlayan
+  </script>
+
+  <div class="ust">
+    <div class="marka">Bütçe Defteri</div>
+    <div class="oturum" id="oturum"></div>
+  </div>
+
+  <div id="rozet"></div>
+
+  <div class="ay-satir">
+    <button class="ok" id="geri" aria-label="Önceki ay">←</button>
+    <button class="ok" id="ileri" aria-label="Sonraki ay">→</button>
+    <span class="ay-ad" id="ayAd"></span>
+  </div>
+
+  <div class="etiket">Bu ay harcanan</div>
+  <p class="buyuk" id="toplam">₺0,00</p>
+  <div class="alt-bilgi" id="ozet"></div>
+
+  <div class="serit" id="serit"></div>
+  <div class="anahtar" id="anahtar"></div>
+
+  <div class="izgara">
+    <div>
+      <div class="kart">
+        <h2>Harcama ekle</h2>
+        <div class="alan">
+          <label class="etiket" for="tutar">Tutar (₺)</label>
+          <input id="tutar" inputmode="decimal" placeholder="0,00" />
+        </div>
+        <div class="alan">
+          <label class="etiket" for="kategori">Kategori</label>
+          <select id="kategori"></select>
+        </div>
+        <div class="alan">
+          <label class="etiket" for="aciklama">Açıklama</label>
+          <input id="aciklama" placeholder="Örn. haftalık market" />
+        </div>
+        <div class="alan">
+          <label class="etiket" for="tarih">Tarih</label>
+          <input id="tarih" type="date" />
+        </div>
+        <button class="btn" id="ekle">Harcamayı kaydet</button>
+        <p class="hata" id="formHata" hidden></p>
+      </div>
+
+      <div class="kart">
+        <h2>Son 6 ay</h2>
+        <canvas id="trendGrafik" height="150"></canvas>
+      </div>
+    </div>
+
+    <div>
+      <div class="kart">
+        <h2>Kategori dağılımı</h2>
+        <div class="grafikler">
+          <canvas id="halkaGrafik" height="200"></canvas>
+          <div id="halkaListe"></div>
+        </div>
+      </div>
+
+      <div class="kart">
+        <div class="liste-bas">
+          <h2 style="margin:0">Harcamalar</h2>
+          <button class="csv" id="csv">CSV indir</button>
+        </div>
+        <div id="liste"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   1) KATEGORİLER — renkler TL banknotlarının tonlarından
+   ═══════════════════════════════════════════════════════════════ */
+const KATEGORILER = [
+  { id:'market',  ad:'Market',      renk:'#2F7A4E' },
+  { id:'yeme',    ad:'Yeme–İçme',   renk:'#D2762E' },
+  { id:'ulasim',  ad:'Ulaşım',      renk:'#B03A2E' },
+  { id:'fatura',  ad:'Fatura',      renk:'#1F5C99' },
+  { id:'kira',    ad:'Kira',        renk:'#6B4E9E' },
+  { id:'saglik',  ad:'Sağlık',      renk:'#0E8080' },
+  { id:'eglence', ad:'Eğlence',     renk:'#8A5A44' },
+  { id:'diger',   ad:'Diğer',       renk:'#5B6472' },
+];
+const katBul = id => KATEGORILER.find(k => k.id === id) || KATEGORILER[7];
+
+const AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran',
+               'Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
+const para = n => new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n||0);
+const bugun = () => new Date().toISOString().slice(0,10);
+const ayOf = t => t.slice(0,7);
+const ayKaydir = (a,adim) => { const [y,m]=a.split('-').map(Number);
+  const d=new Date(y,m-1+adim,1);
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0'); };
+const ayEtiket = a => AYLAR[+a.split('-')[1]-1] + ' ' + a.split('-')[0];
+const gunEtiket = t => new Date(t+'T00:00:00')
+  .toLocaleDateString('tr-TR',{day:'numeric',month:'long',weekday:'long'});
+
+/* ═══════════════════════════════════════════════════════════════
+   2) DURUM
+   ═══════════════════════════════════════════════════════════════ */
+let kayitlar = [];        // {id, tutar, kategori, aciklama, tarih}
+let kullanici = null;     // Google ile giriş yapılmışsa Supabase kullanıcısı
+let ay = ayOf(bugun());
+let sb = null;            // Supabase istemcisi (bilgiler doldurulmuşsa)
+
+const bulutVar = () => !!(sb && kullanici);   // "kayıtlar bulutta mı?" sorusunun tek yanıtı
+
+/* ═══════════════════════════════════════════════════════════════
+   3) YEREL DEPO — giriş yapılmamışken kayıtlar burada
+   ═══════════════════════════════════════════════════════════════ */
+const YEREL_ANAHTAR = 'butce:harcamalar';
+function yerelOku(){
+  try { return JSON.parse(localStorage.getItem(YEREL_ANAHTAR)) || []; }
+  catch { return []; }
+}
+function yerelYaz(v){
+  try { localStorage.setItem(YEREL_ANAHTAR, JSON.stringify(v)); } catch {}
+}
+function yereliTemizle(){ try { localStorage.removeItem(YEREL_ANAHTAR); } catch {} }
+
+/* ═══════════════════════════════════════════════════════════════
+   4) BULUT DEPO — Supabase
+   Tablo: harcamalar (SQL en altta, yorum içinde)
+   RLS sayesinde her kullanıcı sadece kendi satırlarını görür.
+   ═══════════════════════════════════════════════════════════════ */
+async function bulutOku(){
+  const { data, error } = await sb.from('harcamalar')
+    .select('id, tutar, kategori, aciklama, tarih')
+    .order('tarih', { ascending:false });
+  if (error) throw error;
+  return data.map(k => ({ ...k, tutar:Number(k.tutar) }));
+}
+async function bulutEkle(kayit){
+  // user_id'yi göndermiyoruz: tabloda default auth.uid() var, sunucu kendisi doldurur.
+  const { data, error } = await sb.from('harcamalar')
+    .insert({ tutar:kayit.tutar, kategori:kayit.kategori,
+              aciklama:kayit.aciklama, tarih:kayit.tarih })
+    .select().single();
+  if (error) throw error;
+  return { ...data, tutar:Number(data.tutar) };
+}
+async function bulutSil(id){
+  const { error } = await sb.from('harcamalar').delete().eq('id', id);
+  if (error) throw error;
+}
+
+/* İlk senkron: kullanıcı giriş yaptığında, cihazda birikmiş kayıtları hesabına taşı. */
+async function ilkSenkron(){
+  const yereldekiler = yerelOku();
+  if (!yereldekiler.length) return;
+  for (const k of yereldekiler) await bulutEkle(k);
+  yereliTemizle();   // artık buluttalar
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   5) GOOGLE GİRİŞ AKIŞI
+   [Giriş yap] → Google hesap seçimi → Supabase callback → siteye dönüş
+   → onAuthStateChange tetiklenir → bulut moduna geçilir
+   ═══════════════════════════════════════════════════════════════ */
+async function girisYap(){
+  await sb.auth.signInWithOAuth({
+    provider: 'google',
+    options: { redirectTo: window.location.origin + window.location.pathname }
+  });
+  // Sayfa Google'a yönlenir; buradan sonrası dönüşte çalışır.
+}
+async function cikisYap(){ await sb.auth.signOut(); }
+
+/* ═══════════════════════════════════════════════════════════════
+   6) BAŞLANGIÇ
+   ═══════════════════════════════════════════════════════════════ */
+async function baslat(){
+  if (SUPABASE_URL && SUPABASE_KEY && window.supabase) {
+    sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    // Oturumun tek doğruluk kaynağı bu dinleyici: giriş, çıkış, sayfa yenileme,
+    // Google'dan dönüş — hepsi buraya düşer.
+    sb.auth.onAuthStateChange(async (_olay, oturum) => {
+      kullanici = oturum?.user || null;
+      if (kullanici) {
+        await ilkSenkron();
+        kayitlar = await bulutOku();
+      } else {
+        kayitlar = yerelOku();
+      }
+      ciz();
+    });
+
+    const { data } = await sb.auth.getSession();
+    kullanici = data.session?.user || null;
+    kayitlar = kullanici ? await bulutOku() : yerelOku();
+  } else {
+    // Supabase bilgileri doldurulmamış → program yerel modda çalışır.
+    kayitlar = yerelOku();
+  }
+  ciz();
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   7) EYLEMLER
+   ═══════════════════════════════════════════════════════════════ */
+async function ekle(){
+  const ham = document.getElementById('tutar').value;
+  const sayi = parseFloat(String(ham).replace(/\./g,'').replace(',','.'));
+  const t = document.getElementById('tarih').value;
+  const hataEl = document.getElementById('formHata');
+
+  if (!sayi || sayi <= 0) return göster(hataEl,'Sıfırdan büyük bir tutar gir.');
+  if (!t) return göster(hataEl,'Bir tarih seç.');
+  hataEl.hidden = true;
+
+  const kayit = {
+    id: crypto.randomUUID(),
+    tutar: Math.round(sayi*100)/100,
+    kategori: document.getElementById('kategori').value,
+    aciklama: document.getElementById('aciklama').value.trim(),
+    tarih: t,
+  };
+
+  if (bulutVar()) {
+    try { const kaydedilen = await bulutEkle(kayit); kayitlar.push(kaydedilen); }
+    catch { return göster(hataEl,'Buluta kaydedilemedi. Bağlantını kontrol et.'); }
+  } else {
+    kayitlar.push(kayit);
+    yerelYaz(kayitlar);
+  }
+
+  document.getElementById('tutar').value = '';
+  document.getElementById('aciklama').value = '';
+  ay = ayOf(t);
+  ciz();
+}
+
+async function sil(id){
+  const yedek = kayitlar;
+  kayitlar = kayitlar.filter(k => k.id !== id);
+  ciz();
+  if (bulutVar()) {
+    try { await bulutSil(id); }
+    catch { kayitlar = yedek; ciz(); }   // silinemediyse geri koy
+  } else {
+    yerelYaz(kayitlar);
+  }
+}
+
+function göster(el, metin){ el.textContent = metin; el.hidden = false; }
+
+/* ═══════════════════════════════════════════════════════════════
+   8) ÇİZİM
+   ═══════════════════════════════════════════════════════════════ */
+let halka, trend;
+
+function ciz(){
+  const ayKayitlari = kayitlar.filter(k => ayOf(k.tarih) === ay)
+    .sort((a,b) => b.tarih.localeCompare(a.tarih));
+  const toplam = ayKayitlari.reduce((t,k) => t + k.tutar, 0);
+
+  // Oturum çubuğu
+  const oturumEl = document.getElementById('oturum');
+  const rozetEl  = document.getElementById('rozet');
+  if (!sb) {
+    oturumEl.innerHTML = '';
+    rozetEl.innerHTML = '<div class="rozet bilgi">Supabase bilgileri girilmemiş. Program çalışıyor ama kayıtlar yalnızca bu cihazda kalıyor.</div>';
+  } else if (kullanici) {
+    oturumEl.innerHTML =
+      (kullanici.user_metadata?.avatar_url ? `<img class="avatar" src="${kullanici.user_metadata.avatar_url}" alt="">` : '') +
+      `<span>${kullanici.email}</span><button class="baglanti" id="cikis">Çıkış yap</button>`;
+    document.getElementById('cikis').onclick = cikisYap;
+    rozetEl.innerHTML = '';
+  } else {
+    oturumEl.innerHTML = '<button class="gbtn" id="giris">Google ile giriş yap</button>';
+    document.getElementById('giris').onclick = girisYap;
+    rozetEl.innerHTML = '<div class="rozet bilgi">Kayıtların yalnızca bu cihazda. Giriş yaparsan telefonundan da aynı kayıtları görürsün.</div>';
+  }
+
+  // Başlık
+  document.getElementById('ayAd').textContent = ayEtiket(ay);
+  document.getElementById('toplam').textContent = para(toplam);
+
+  const gunSayisi = new Set(ayKayitlari.map(k => k.tarih)).size;
+  const katToplam = KATEGORILER
+    .map(k => ({ ...k, deger: ayKayitlari.filter(h => h.kategori===k.id)
+                              .reduce((t,h) => t+h.tutar, 0) }))
+    .filter(k => k.deger > 0).sort((a,b) => b.deger - a.deger);
+
+  document.getElementById('ozet').innerHTML = ayKayitlari.length
+    ? `<span><b>${ayKayitlari.length}</b> kayıt</span>
+       <span>Harcama yapılan günde ortalama <b>${para(toplam/gunSayisi)}</b></span>
+       <span>En çok <b>${katToplam[0].ad}</b></span>`
+    : '';
+
+  // Banknot şeridi
+  const seritEl = document.getElementById('serit');
+  seritEl.innerHTML = katToplam.length
+    ? katToplam.map(k => {
+        const pay = Math.round(k.deger/toplam*100);
+        return `<div class="dilim" style="flex-grow:${k.deger};background:${k.renk}"
+                 title="${k.ad} — ${para(k.deger)}">${pay >= 8 ? '%'+pay : ''}</div>`;
+      }).join('')
+    : '<div class="serit-bos">Bu ay için henüz harcama yok</div>';
+
+  document.getElementById('anahtar').innerHTML = katToplam
+    .map(k => `<span><i class="nokta" style="background:${k.renk}"></i>${k.ad}
+               <b class="tutar">${para(k.deger)}</b></span>`).join('');
+
+  // Halka grafik
+  halka?.destroy();
+  halka = new Chart(document.getElementById('halkaGrafik'), {
+    type:'doughnut',
+    data:{ labels:katToplam.map(k=>k.ad),
+           datasets:[{ data:katToplam.map(k=>k.deger),
+                       backgroundColor:katToplam.map(k=>k.renk), borderWidth:0 }] },
+    options:{ cutout:'62%', plugins:{ legend:{display:false},
+      tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } } }
+  });
+
+  document.getElementById('halkaListe').innerHTML = katToplam.length
+    ? katToplam.map(k => `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
+        <i class="nokta" style="background:${k.renk}"></i>
+        <span style="flex:1">${k.ad}</span>
+        <b class="tutar">${para(k.deger)}</b></div>`).join('')
+    : '<div class="bos">İlk harcamayı ekleyince grafik oluşur.</div>';
+
+  // Trend
+  const aylar = [];
+  for (let i=5;i>=0;i--) aylar.push(ayKaydir(ay,-i));
+  trend?.destroy();
+  trend = new Chart(document.getElementById('trendGrafik'), {
+    type:'bar',
+    data:{ labels: aylar.map(a => AYLAR[+a.split('-')[1]-1].slice(0,3)),
+           datasets:[{ data: aylar.map(a => kayitlar.filter(k=>ayOf(k.tarih)===a)
+                                 .reduce((t,k)=>t+k.tutar,0)),
+                       backgroundColor: aylar.map(a => a===ay ? '#16181D' : '#C8CDD4'),
+                       borderRadius:2 }] },
+    options:{ plugins:{ legend:{display:false},
+                tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } },
+              scales:{ y:{ display:false }, x:{ grid:{display:false} } } }
+  });
+
+  // Liste
+  const listeEl = document.getElementById('liste');
+  document.getElementById('csv').hidden = !ayKayitlari.length;
+
+  if (!ayKayitlari.length) {
+    listeEl.innerHTML = `<div class="bos"><strong>${ayEtiket(ay)} için kayıt yok</strong>
+      Soldaki formdan ilk harcamanı ekle.</div>`;
+    return;
+  }
+  const gruplar = {};
+  ayKayitlari.forEach(k => (gruplar[k.tarih] ||= []).push(k));
+  listeEl.innerHTML = Object.entries(gruplar).map(([gun, satirlar]) => `
+    <div class="gun">${gunEtiket(gun)}</div>
+    ${satirlar.map(k => { const kat = katBul(k.kategori); return `
+      <div class="satir">
+        <span class="renk" style="background:${kat.renk}"></span>
+        <span class="ad"><strong>${k.aciklama || kat.ad}</strong><small>${kat.ad}</small></span>
+        <span class="tutar">${para(k.tutar)}</span>
+        <button class="sil" data-id="${k.id}" aria-label="Sil">×</button>
+      </div>`; }).join('')}
+  `).join('');
+
+  listeEl.querySelectorAll('.sil').forEach(b => b.onclick = () => sil(b.dataset.id));
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   9) BAĞLANTILAR
+   ═══════════════════════════════════════════════════════════════ */
+document.getElementById('kategori').innerHTML =
+  KATEGORILER.map(k => `<option value="${k.id}">${k.ad}</option>`).join('');
+document.getElementById('tarih').value = bugun();
+document.getElementById('ekle').onclick = ekle;
+document.getElementById('geri').onclick  = () => { ay = ayKaydir(ay,-1); ciz(); };
+document.getElementById('ileri').onclick = () => { ay = ayKaydir(ay, 1); ciz(); };
+['tutar','aciklama'].forEach(id =>
+  document.getElementById(id).addEventListener('keydown', e => e.key==='Enter' && ekle()));
+
+document.getElementById('csv').onclick = () => {
+  const satirlar = [['Tarih','Kategori','Açıklama','Tutar']].concat(
+    kayitlar.filter(k => ayOf(k.tarih)===ay)
+      .map(k => [k.tarih, katBul(k.kategori).ad, k.aciklama, String(k.tutar).replace('.',',')]));
+  const csv = '\uFEFF' + satirlar.map(s =>
+    s.map(h => `"${String(h).replace(/"/g,'""')}"`).join(';')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv],{type:'text/csv'}));
+  a.download = `harcamalar-${ay}.csv`;
+  a.click();
+};
+
+baslat();
+</script>
+
+<!--
+═══════════════════════════════════════════════════════════════════
+SUPABASE TABLOSU — SQL Editor'a yapıştır, çalıştır (şablonun 4. adımı)
+═══════════════════════════════════════════════════════════════════
+
+create table harcamalar (
+  id uuid default gen_random_uuid() primary key,
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  tutar numeric not null,
+  kategori text not null,
+  aciklama text default '',
+  tarih date not null,
+  created_at timestamp default now()
+);
+
+alter table harcamalar enable row level security;
+
+-- Herkes yalnızca kendi satırlarını görür ve değiştirir.
+-- Lisans tablosundaki "herkes okuyabilir" politikasından farkı bu:
+-- burada kişisel veri var, açık okuma olmamalı.
+create policy "kendi kayitlarini gorur"    on harcamalar for select using (auth.uid() = user_id);
+create policy "kendi kaydini ekler"        on harcamalar for insert with check (auth.uid() = user_id);
+create policy "kendi kaydini siler"        on harcamalar for delete using (auth.uid() = user_id);
+create policy "kendi kaydini gunceller"    on harcamalar for update using (auth.uid() = user_id);
+-->
+</body>
+</html>
