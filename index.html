@@ -10,6 +10,7 @@
         NOT: Bu sürüm için Supabase'de "kategoriler" tablosu oluşturuldu.
   v1.4  Bütçe limitleri: aylık toplam + kategori bazlı limit, aşınca uyarı
         NOT: Bu sürüm için Supabase'de "limitler" tablosu oluşturuldu.
+  v1.5  Arama (açıklama/kategori) + Yıl özeti penceresi (Supabase değişikliği yok)
 -->
 <html lang="tr">
 <head>
@@ -84,6 +85,24 @@
   .limit-input:focus{outline:2px solid var(--murekkep);outline-offset:1px;background:#fff}
   .limit-para{color:var(--ikincil);font-size:13px}
   .limit-etiket{color:var(--ikincil);font-size:11px}
+  .arama-kutu{width:100%;box-sizing:border-box;padding:9px 10px;margin-bottom:8px;
+    border:1px solid var(--cizgi);border-radius:3px;background:#FBFCFD;
+    font:14px 'IBM Plex Sans',sans-serif;color:var(--murekkep)}
+  .arama-kutu:focus{outline:2px solid var(--murekkep);outline-offset:1px;background:#fff}
+  .arama-sonuc{font:600 12px 'IBM Plex Mono',monospace;color:var(--ikincil);
+    padding:4px 0 8px;border-bottom:1px solid var(--cizgi);margin-bottom:6px}
+  .yil-btn{margin-left:auto;background:var(--yuzey);border:1px solid var(--cizgi);
+    border-radius:3px;padding:7px 12px;font:600 13px 'IBM Plex Sans',sans-serif;
+    color:var(--murekkep);cursor:pointer}
+  .yil-btn:hover{background:var(--murekkep);color:#fff;border-color:var(--murekkep)}
+  .modal-katman{position:fixed;inset:0;background:rgba(22,24,29,.5);z-index:50;
+    display:flex;align-items:flex-start;justify-content:center;padding:40px 16px;overflow-y:auto}
+  .modal{background:var(--kagit);border-radius:6px;padding:22px;max-width:560px;width:100%;
+    box-shadow:0 20px 60px rgba(0,0,0,.3)}
+  .modal-bas{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .modal-kapat{border:none;background:none;font-size:26px;line-height:1;cursor:pointer;
+    color:var(--ikincil);padding:0 4px}
+  .modal-kapat:hover{color:var(--murekkep)}
 
   /* İmza: banknot şeridi */
   .serit{display:flex;height:34px;border-radius:3px;overflow:hidden;margin-top:18px;
@@ -181,7 +200,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v1.4</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v1.5</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -191,6 +210,7 @@
     <button class="ok" id="geri" aria-label="Önceki ay">←</button>
     <button class="ok" id="ileri" aria-label="Sonraki ay">→</button>
     <span class="ay-ad" id="ayAd"></span>
+    <button class="yil-btn" id="yilOzetBtn">Yıl özeti</button>
   </div>
 
   <div class="etiket">Bu ay harcanan</div>
@@ -270,9 +290,33 @@
           <h2 style="margin:0">Harcamalar</h2>
           <button class="csv" id="csv">CSV indir</button>
         </div>
+        <input id="arama" class="arama-kutu" placeholder="Açıklama veya kategoride ara…" />
         <div id="liste"></div>
       </div>
     </div>
+  </div>
+</div>
+
+<!-- Yıl özeti penceresi -->
+<div class="modal-katman" id="yilModal" hidden>
+  <div class="modal">
+    <div class="modal-bas">
+      <div class="ay-satir" style="margin:0">
+        <button class="ok" id="yilGeri" aria-label="Önceki yıl">←</button>
+        <button class="ok" id="yilIleri" aria-label="Sonraki yıl">→</button>
+        <span class="ay-ad" id="yilBaslik"></span>
+      </div>
+      <button class="modal-kapat" id="yilKapat" aria-label="Kapat">×</button>
+    </div>
+
+    <div class="etiket" style="margin-top:6px">Yıl toplamı</div>
+    <div class="alt-bilgi" id="yilOzet" style="margin-bottom:16px"></div>
+
+    <div class="etiket">Aylara göre gider</div>
+    <canvas id="yilGrafik" height="150" style="margin:8px 0 18px"></canvas>
+
+    <div class="etiket">Kategori dağılımı (yıllık)</div>
+    <div id="yilKatListe" style="margin-top:10px"></div>
   </div>
 </div>
 
@@ -318,6 +362,7 @@ let sb = null;            // Supabase istemcisi (bilgiler doldurulmuşsa)
 let duzenlenenId = null;  // bir kaydı düzenliyorsak o kaydın id'si; yoksa null (ekleme modu)
 let seciliTur = 'gider';  // formdaki gider/gelir seçimi
 let limitler = {};        // { toplam: 5000, market: 2000, ... }  — 'toplam' özel anahtar
+let arama = '';           // harcama listesinde arama metni
 
 const bulutVar = () => !!(sb && kullanici);   // "kayıtlar bulutta mı?" sorusunun tek yanıtı
 
@@ -636,6 +681,66 @@ function limitPaneliCiz(){
   });
 }
 
+/* ═══════════════════════════════════════════════════════════════
+   YIL ÖZETİ
+   ═══════════════════════════════════════════════════════════════ */
+let seciliYil = new Date().getFullYear();
+let yilGrafik = null;
+
+function yilOzetiniAc(){
+  document.getElementById('yilModal').hidden = false;
+  yilOzetiniCiz();
+}
+function yilOzetiniKapat(){
+  document.getElementById('yilModal').hidden = true;
+}
+
+function yilOzetiniCiz(){
+  const yilKayitlari = kayitlar.filter(k => k.tarih.slice(0,4) === String(seciliYil));
+  const giderler = yilKayitlari.filter(k => (k.tur||'gider') === 'gider');
+  const gelirler = yilKayitlari.filter(k => k.tur === 'gelir');
+  const gider = giderler.reduce((t,k) => t+k.tutar, 0);
+  const gelir = gelirler.reduce((t,k) => t+k.tutar, 0);
+  const kalan = gelir - gider;
+
+  document.getElementById('yilBaslik').textContent = seciliYil + ' özeti';
+  document.getElementById('yilOzet').innerHTML =
+    `<span>Gelir <b class="pozitif">${para(gelir)}</b></span>
+     <span>Gider <b>${para(gider)}</b></span>
+     <span>Kalan <b class="${kalan >= 0 ? 'pozitif' : 'negatif'}">${para(kalan)}</b></span>`;
+
+  // 12 aylık gider grafiği
+  const aylikGider = [];
+  for (let a=1; a<=12; a++){
+    const ay2 = `${seciliYil}-${String(a).padStart(2,'0')}`;
+    aylikGider.push(giderler.filter(k => ayOf(k.tarih)===ay2).reduce((t,k)=>t+k.tutar,0));
+  }
+  yilGrafik?.destroy();
+  yilGrafik = new Chart(document.getElementById('yilGrafik'), {
+    type:'bar',
+    data:{ labels: AYLAR.map(a => a.slice(0,3)),
+           datasets:[{ data: aylikGider, backgroundColor:'#16181D', borderRadius:2 }] },
+    options:{ plugins:{ legend:{display:false},
+                tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } },
+              scales:{ y:{ display:false }, x:{ grid:{display:false},
+                ticks:{ font:{ size:10 } } } } }
+  });
+
+  // Yıllık kategori dağılımı
+  const gecenIdler = [...new Set(giderler.map(k => k.kategori))];
+  const katToplam = gecenIdler
+    .map(id => ({ ...katBul(id), deger: giderler.filter(h => h.kategori===id)
+                                        .reduce((t,h) => t+h.tutar, 0) }))
+    .filter(k => k.deger > 0).sort((a,b) => b.deger - a.deger);
+
+  document.getElementById('yilKatListe').innerHTML = katToplam.length
+    ? katToplam.map(k => `<div style="display:flex;gap:8px;align-items:center;padding:6px 0;font-size:13px;border-top:1px solid var(--cizgi)">
+        <i class="nokta" style="background:${k.renk}"></i>
+        <span style="flex:1">${k.ad}</span>
+        <b class="tutar">${para(k.deger)}</b></div>`).join('')
+    : '<div class="bos" style="padding:16px">Bu yıl için gider kaydı yok.</div>';
+}
+
 async function kategoriEkle(){
   const adEl = document.getElementById('katAd');
   const renkEl = document.getElementById('katRenk');
@@ -855,6 +960,16 @@ function ciz(){
   const listeEl = document.getElementById('liste');
   document.getElementById('csv').hidden = !ayKayitlari.length;
 
+  // Arama filtresi: açıklama veya kategori adında geçenleri süz.
+  const q = arama.trim().toLocaleLowerCase('tr');
+  const listelenecek = q
+    ? ayKayitlari.filter(k => {
+        const kat = k.tur === 'gelir' ? 'gelir' : katBul(k.kategori).ad;
+        return (k.aciklama || '').toLocaleLowerCase('tr').includes(q)
+            || kat.toLocaleLowerCase('tr').includes(q);
+      })
+    : ayKayitlari;
+
   if (!ayKayitlari.length) {
     listeEl.innerHTML = `<div class="bos"><strong>${ayEtiket(ay)} için kayıt yok</strong>
       Soldaki formdan ilk harcamanı ekle.</div>`;
@@ -862,9 +977,18 @@ function ciz(){
     limitPaneliCiz();
     return;
   }
+  if (q && !listelenecek.length) {
+    listeEl.innerHTML = `<div class="bos"><strong>"${arama}" için sonuç yok</strong>
+      Bu ay bu aramayla eşleşen kayıt bulunamadı.</div>`;
+    kategoriPaneliCiz();
+    limitPaneliCiz();
+    return;
+  }
   const gruplar = {};
-  ayKayitlari.forEach(k => (gruplar[k.tarih] ||= []).push(k));
-  listeEl.innerHTML = Object.entries(gruplar).map(([gun, satirlar]) => `
+  listelenecek.forEach(k => (gruplar[k.tarih] ||= []).push(k));
+  listeEl.innerHTML =
+    (q ? `<div class="arama-sonuc">${listelenecek.length} sonuç · toplam ${para(listelenecek.reduce((t,k)=>t+(k.tur==='gelir'?0:k.tutar),0))}</div>` : '') +
+    Object.entries(gruplar).map(([gun, satirlar]) => `
     <div class="gun">${gunEtiket(gun)}</div>
     ${satirlar.map(k => {
       const gelir = k.tur === 'gelir';
@@ -901,6 +1025,14 @@ document.getElementById('katEkleBtn').onclick = kategoriEkle;
 document.getElementById('katAd').addEventListener('keydown', e => e.key==='Enter' && kategoriEkle());
 document.getElementById('geri').onclick  = () => { ay = ayKaydir(ay,-1); ciz(); };
 document.getElementById('ileri').onclick = () => { ay = ayKaydir(ay, 1); ciz(); };
+document.getElementById('arama').addEventListener('input', e => { arama = e.target.value; ciz(); });
+document.getElementById('yilOzetBtn').onclick = yilOzetiniAc;
+document.getElementById('yilKapat').onclick = yilOzetiniKapat;
+document.getElementById('yilGeri').onclick = () => { seciliYil--; yilOzetiniCiz(); };
+document.getElementById('yilIleri').onclick = () => { seciliYil++; yilOzetiniCiz(); };
+document.getElementById('yilModal').addEventListener('click', e => {
+  if (e.target.id === 'yilModal') yilOzetiniKapat();   // dışına tıklayınca kapat
+});
 ['tutar','aciklama'].forEach(id =>
   document.getElementById(id).addEventListener('keydown', e => e.key==='Enter' && ekle()));
 
