@@ -8,6 +8,8 @@
         alter table harcamalar add column tur text not null default 'gider';
   v1.3  Kendi kategorilerini yönetme (ekle/sil, varsayılanlar dahil)
         NOT: Bu sürüm için Supabase'de "kategoriler" tablosu oluşturuldu.
+  v1.4  Bütçe limitleri: aylık toplam + kategori bazlı limit, aşınca uyarı
+        NOT: Bu sürüm için Supabase'de "limitler" tablosu oluşturuldu.
 -->
 <html lang="tr">
 <head>
@@ -68,6 +70,20 @@
   .alt-bilgi b{font-family:'IBM Plex Mono',monospace;color:var(--murekkep)}
   .pozitif{color:#2F7A4E!important}
   .negatif{color:var(--kirmizi)!important}
+  .limit-cubuk{position:relative;height:26px;border-radius:3px;overflow:hidden;
+    background:var(--yuzey);border:1px solid var(--cizgi);margin-top:12px}
+  .limit-dolu{position:absolute;inset:0 auto 0 0;background:#C8CDD4;transition:width .35s ease}
+  .limit-cubuk.yakin .limit-dolu{background:#E8A87C}
+  .limit-cubuk.asildi .limit-dolu{background:#E4B4AE}
+  .limit-metin{position:relative;z-index:1;display:flex;align-items:center;height:100%;
+    padding:0 10px;font:600 11px 'IBM Plex Mono',monospace;color:var(--murekkep)}
+  .limit-cubuk.asildi .limit-metin{color:#8C3325}
+  .limit-not{font-size:12px;color:var(--ikincil);margin:12px 0 4px}
+  .limit-input{width:80px;padding:6px 8px;border:1px solid var(--cizgi);border-radius:3px;
+    background:#FBFCFD;font:14px 'IBM Plex Mono',monospace;color:var(--murekkep);text-align:right}
+  .limit-input:focus{outline:2px solid var(--murekkep);outline-offset:1px;background:#fff}
+  .limit-para{color:var(--ikincil);font-size:13px}
+  .limit-etiket{color:var(--ikincil);font-size:11px}
 
   /* İmza: banknot şeridi */
   .serit{display:flex;height:34px;border-radius:3px;overflow:hidden;margin-top:18px;
@@ -165,7 +181,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v1.3</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v1.4</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -180,6 +196,7 @@
   <div class="etiket">Bu ay harcanan</div>
   <p class="buyuk" id="toplam">₺0,00</p>
   <div class="alt-bilgi" id="ozet"></div>
+  <div class="limit-cubuk" id="limitUyari" hidden></div>
 
   <div class="serit" id="serit"></div>
   <div class="anahtar" id="anahtar"></div>
@@ -227,6 +244,14 @@
             <input id="katRenk" type="color" value="#2F7A4E" title="Renk seç" />
             <button class="btn" id="katEkleBtn" style="width:auto;padding:9px 14px">Ekle</button>
           </div>
+        </details>
+      </div>
+
+      <div class="kart">
+        <details>
+          <summary class="kat-baslik">Bütçe limitleri</summary>
+          <p class="limit-not">Boş bırakırsan limit yok. Limit aştığında uyarı gösterilir.</p>
+          <div id="limitListe" class="kat-liste"></div>
         </details>
       </div>
     </div>
@@ -292,6 +317,7 @@ let ay = ayOf(bugun());
 let sb = null;            // Supabase istemcisi (bilgiler doldurulmuşsa)
 let duzenlenenId = null;  // bir kaydı düzenliyorsak o kaydın id'si; yoksa null (ekleme modu)
 let seciliTur = 'gider';  // formdaki gider/gelir seçimi
+let limitler = {};        // { toplam: 5000, market: 2000, ... }  — 'toplam' özel anahtar
 
 const bulutVar = () => !!(sb && kullanici);   // "kayıtlar bulutta mı?" sorusunun tek yanıtı
 
@@ -318,6 +344,16 @@ function yerelKategoriOku(){
 }
 function yerelKategoriYaz(v){
   try { localStorage.setItem(YEREL_KAT_ANAHTAR, JSON.stringify(v)); } catch {}
+}
+
+/* Yerel limit depo. Obje: { toplam: 5000, market: 2000 } */
+const YEREL_LIMIT_ANAHTAR = 'butce:limitler';
+function yerelLimitOku(){
+  try { return JSON.parse(localStorage.getItem(YEREL_LIMIT_ANAHTAR)) || {}; }
+  catch { return {}; }
+}
+function yerelLimitYaz(v){
+  try { localStorage.setItem(YEREL_LIMIT_ANAHTAR, JSON.stringify(v)); } catch {}
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -371,6 +407,24 @@ async function bulutKategoriSil(id){
   if (error) throw error;
 }
 
+/* Bulut limit işlemleri. */
+async function bulutLimitOku(){
+  const { data, error } = await sb.from('limitler').select('kategori, limit_tutar');
+  if (error) throw error;
+  const o = {};
+  data.forEach(r => o[r.kategori] = Number(r.limit_tutar));
+  return o;
+}
+async function bulutLimitKaydet(kategori, tutar){
+  const { error } = await sb.from('limitler')
+    .upsert({ kategori, limit_tutar: tutar }, { onConflict: 'user_id,kategori' });
+  if (error) throw error;
+}
+async function bulutLimitSil(kategori){
+  const { error } = await sb.from('limitler').delete().eq('kategori', kategori);
+  if (error) throw error;
+}
+
 /* Kategorileri yükle. Bulutta hiç kategori yoksa (ilk kez), o anki yerel
    kategorileri (varsayılanlar + kullanıcının eklediği) buluta taşı. */
 async function kategorileriYukle(){
@@ -385,6 +439,28 @@ async function kategorileriYukle(){
   } else {
     aktifKategoriler = yerelKategoriOku();
   }
+}
+
+/* Limitleri yükle. */
+async function limitleriYukle(){
+  if (bulutVar()) {
+    try { limitler = await bulutLimitOku(); } catch { limitler = {}; }
+  } else {
+    limitler = yerelLimitOku();
+  }
+}
+
+/* Limit ayarla: tutar 0/boşsa limiti kaldır, değilse kaydet. */
+async function limitAyarla(kategori, tutar){
+  if (!tutar || tutar <= 0) {
+    delete limitler[kategori];
+    if (bulutVar()) { try { await bulutLimitSil(kategori); } catch {} }
+  } else {
+    limitler[kategori] = tutar;
+    if (bulutVar()) { try { await bulutLimitKaydet(kategori, tutar); } catch {} }
+  }
+  if (!bulutVar()) yerelLimitYaz(limitler);
+  ciz();
 }
 
 /* İlk senkron: kullanıcı giriş yaptığında, cihazda birikmiş kayıtları hesabına taşı. */
@@ -423,9 +499,11 @@ async function baslat(){
       if (kullanici) {
         await ilkSenkron();
         await kategorileriYukle();
+        await limitleriYukle();
         kayitlar = await bulutOku();
       } else {
         await kategorileriYukle();
+        await limitleriYukle();
         kayitlar = yerelOku();
       }
       kategoriSecicisiDoldur();
@@ -435,10 +513,12 @@ async function baslat(){
     const { data } = await sb.auth.getSession();
     kullanici = data.session?.user || null;
     await kategorileriYukle();
+    await limitleriYukle();
     kayitlar = kullanici ? await bulutOku() : yerelOku();
   } else {
     // Supabase bilgileri doldurulmamış → program yerel modda çalışır.
     await kategorileriYukle();
+    await limitleriYukle();
     kayitlar = yerelOku();
   }
   kategoriSecicisiDoldur();
@@ -528,6 +608,32 @@ function kategoriPaneliCiz(){
     </div>`).join('') || '<div class="bos" style="padding:12px">Hiç kategori yok. Aşağıdan ekle.</div>';
   el.querySelectorAll('.kat-sil').forEach(b =>
     b.onclick = () => kategoriSil(b.dataset.id));
+}
+
+/* Limit yönetim panelini çiz: toplam + her kategori için bir tutar girişi. */
+function limitPaneliCiz(){
+  const el = document.getElementById('limitListe');
+  if (!el) return;
+  const satir = (anahtar, ad, renk) => `
+    <div class="kat-satir">
+      ${renk ? `<span class="nokta" style="background:${renk}"></span>` : '<span class="nokta" style="background:#16181D"></span>'}
+      <span class="kat-ad">${ad}</span>
+      <input class="limit-input" type="text" inputmode="decimal"
+        data-anahtar="${anahtar}" placeholder="—"
+        value="${limitler[anahtar] ? String(limitler[anahtar]).replace('.',',') : ''}" />
+      <span class="limit-para">₺</span>
+    </div>`;
+
+  el.innerHTML =
+    satir('toplam', 'Aylık toplam', '') +
+    aktifKategoriler.map(k => satir(k.id, k.ad, k.renk)).join('');
+
+  el.querySelectorAll('.limit-input').forEach(inp => {
+    inp.onchange = () => {
+      const sayi = parseFloat(String(inp.value).replace(/\./g,'').replace(',','.'));
+      limitAyarla(inp.dataset.anahtar, isNaN(sayi) ? 0 : sayi);
+    };
+  });
 }
 
 async function kategoriEkle(){
@@ -670,6 +776,26 @@ function ciz(){
        <span>Kalan <b class="${kalan >= 0 ? 'pozitif' : 'negatif'}">${para(kalan)}</b></span>`
     : '');
 
+  // Toplam bütçe limiti uyarısı
+  const limitUyariEl = document.getElementById('limitUyari');
+  const toplamLimit = limitler['toplam'];
+  if (toplamLimit && toplam > 0) {
+    const oran = Math.round(toplam / toplamLimit * 100);
+    const asim = toplam - toplamLimit;
+    if (asim > 0) {
+      limitUyariEl.className = 'limit-cubuk asildi';
+      limitUyariEl.innerHTML = `<div class="limit-dolu" style="width:100%"></div>
+        <span class="limit-metin">⚠ Aylık limiti ${para(asim)} aştın (${para(toplam)} / ${para(toplamLimit)})</span>`;
+    } else {
+      limitUyariEl.className = 'limit-cubuk' + (oran >= 80 ? ' yakin' : '');
+      limitUyariEl.innerHTML = `<div class="limit-dolu" style="width:${oran}%"></div>
+        <span class="limit-metin">Aylık limit: ${para(toplam)} / ${para(toplamLimit)} (%${oran})</span>`;
+    }
+    limitUyariEl.hidden = false;
+  } else {
+    limitUyariEl.hidden = true;
+  }
+
   // Banknot şeridi
   const seritEl = document.getElementById('serit');
   seritEl.innerHTML = katToplam.length
@@ -696,10 +822,17 @@ function ciz(){
   });
 
   document.getElementById('halkaListe').innerHTML = katToplam.length
-    ? katToplam.map(k => `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
+    ? katToplam.map(k => {
+        const lim = limitler[k.id];
+        const asildi = lim && k.deger > lim;
+        const limMetin = lim
+          ? `<small class="limit-etiket ${asildi ? 'negatif' : ''}">/ ${para(lim)}${asildi ? ' ⚠' : ''}</small>`
+          : '';
+        return `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;font-size:13px">
         <i class="nokta" style="background:${k.renk}"></i>
         <span style="flex:1">${k.ad}</span>
-        <b class="tutar">${para(k.deger)}</b></div>`).join('')
+        <b class="tutar ${asildi ? 'negatif' : ''}">${para(k.deger)}</b>${limMetin}</div>`;
+      }).join('')
     : '<div class="bos">İlk harcamayı ekleyince grafik oluşur.</div>';
 
   // Trend
@@ -726,6 +859,7 @@ function ciz(){
     listeEl.innerHTML = `<div class="bos"><strong>${ayEtiket(ay)} için kayıt yok</strong>
       Soldaki formdan ilk harcamanı ekle.</div>`;
     kategoriPaneliCiz();
+    limitPaneliCiz();
     return;
   }
   const gruplar = {};
@@ -752,6 +886,7 @@ function ciz(){
   listeEl.querySelectorAll('.duzenle').forEach(b => b.onclick = () => duzenle(b.dataset.id));
 
   kategoriPaneliCiz();
+  limitPaneliCiz();
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -825,6 +960,19 @@ create policy "kendi kategorilerini gorur"   on kategoriler for select using (au
 create policy "kendi kategorisini ekler"     on kategoriler for insert with check (auth.uid() = user_id);
 create policy "kendi kategorisini siler"     on kategoriler for delete using (auth.uid() = user_id);
 create policy "kendi kategorisini gunceller" on kategoriler for update using (auth.uid() = user_id);
+
+-- ─── v1.4: LİMİTLER TABLOSU ───
+create table limitler (
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  kategori text not null,
+  limit_tutar numeric not null,
+  primary key (user_id, kategori)
+);
+alter table limitler enable row level security;
+create policy "kendi limitlerini gorur"   on limitler for select using (auth.uid() = user_id);
+create policy "kendi limitini ekler"      on limitler for insert with check (auth.uid() = user_id);
+create policy "kendi limitini siler"      on limitler for delete using (auth.uid() = user_id);
+create policy "kendi limitini gunceller"  on limitler for update using (auth.uid() = user_id);
 -->
 </body>
 </html>
