@@ -19,6 +19,7 @@
   v1.8  Kategoriler/limitler/tekrarlayanlar Ayarlar penceresine taşındı (sayfa kısaldı)
   v1.9  İçerik genişletildi (geniş ekranlarda kenar boşlukları azaldı)
   v2.0  4 sütunlu düzen: form, kategori dağılımı, son 6 ay, harcamalar yan yana
+  v2.1  Düzen: sol form, orta harcamalar, sağda grafikler alt alta (3 sütun)
 -->
 <html lang="tr">
 <head>
@@ -44,7 +45,7 @@
     font-family:'IBM Plex Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
     padding:24px 18px 60px;
   }
-  .govde{max-width:1560px;margin:0 auto}
+  .govde{max-width:1440px;margin:0 auto}
   .tutar{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
   .etiket{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
     text-transform:uppercase;color:var(--ikincil)}
@@ -135,9 +136,10 @@
   .anahtar span{display:flex;align-items:center;gap:6px}
   .nokta{width:8px;height:8px;border-radius:2px;display:inline-block}
 
-  .izgara{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;align-items:start;margin-top:26px}
-  @media(max-width:1100px){.izgara{grid-template-columns:1fr 1fr}}
+  .izgara{display:grid;grid-template-columns:340px minmax(0,1fr) 350px;gap:18px;align-items:start;margin-top:26px}
+  @media(max-width:1080px){.izgara{grid-template-columns:1fr 1fr}}
   @media(max-width:640px){.izgara{grid-template-columns:1fr}}
+  .sag-sutun{display:flex;flex-direction:column;gap:18px}
 
   .kart{background:var(--yuzey);border:1px solid var(--cizgi);border-radius:4px;padding:18px}
   .kart + .kart{margin-top:18px}
@@ -221,7 +223,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v2.0</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v2.1</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -272,25 +274,27 @@
     </div>
 
     <div class="kart">
-      <h2>Kategori dağılımı</h2>
-      <div class="grafikler">
-        <canvas id="halkaGrafik"></canvas>
-        <div id="halkaListe"></div>
-      </div>
-    </div>
-
-    <div class="kart">
-      <h2>Son 6 ay</h2>
-      <canvas id="trendGrafik" height="150"></canvas>
-    </div>
-
-    <div class="kart">
       <div class="liste-bas">
         <h2 style="margin:0">Harcamalar</h2>
         <button class="csv" id="csv">CSV indir</button>
       </div>
       <input id="arama" class="arama-kutu" placeholder="Açıklama veya kategoride ara…" />
       <div id="liste"></div>
+    </div>
+
+    <div class="sag-sutun">
+      <div class="kart">
+        <h2>Kategori dağılımı</h2>
+        <div class="grafikler">
+          <canvas id="halkaGrafik"></canvas>
+          <div id="halkaListe"></div>
+        </div>
+      </div>
+
+      <div class="kart">
+        <h2>Son 6 ay</h2>
+        <canvas id="trendGrafik" height="150"></canvas>
+      </div>
     </div>
   </div>
 </div>
