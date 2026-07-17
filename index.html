@@ -25,6 +25,7 @@
         NOT: harcamalar tablosuna sira alanı eklendi (alter table ... add column sira).
         v2.3.1  Sürükleme taşıma/kaydetme hatası düzeltildi
   v2.4  Elle sıralama kaldırıldı; yerine hazır sıralama (tarih/tutar, artan/azalan)
+  v2.5  Tema seçimi: Gece, Gündüz, Okyanus, Kahve, Orman (Ayarlar'da)
 -->
 <html lang="tr">
 <head>
@@ -43,6 +44,26 @@
     --murekkep:#E8EDF2; --ikincil:#8792A0; --kagit:#0F1317;
     --yuzey:#171D24; --cizgi:#2A323A; --kirmizi:#E56B64;
     --girdi:#1E252C; --btn-yazi:#0F1317;
+  }
+  body[data-tema="gunduz"]{
+    --murekkep:#16181D; --ikincil:#6B7280; --kagit:#EDEFF2;
+    --yuzey:#FFFFFF; --cizgi:#DDE1E6; --kirmizi:#B03A2E;
+    --girdi:#FBFCFD; --btn-yazi:#FFFFFF;
+  }
+  body[data-tema="okyanus"]{
+    --murekkep:#E0EAF5; --ikincil:#7D91A8; --kagit:#0A1420;
+    --yuzey:#122234; --cizgi:#243851; --kirmizi:#E8746B;
+    --girdi:#16283C; --btn-yazi:#0A1420;
+  }
+  body[data-tema="kahve"]{
+    --murekkep:#F0E8DE; --ikincil:#A89684; --kagit:#1A1410;
+    --yuzey:#26201A; --cizgi:#3A322A; --kirmizi:#E08A6A;
+    --girdi:#2A2420; --btn-yazi:#1A1410;
+  }
+  body[data-tema="orman"]{
+    --murekkep:#E4EEE4; --ikincil:#88A088; --kagit:#0C1610;
+    --yuzey:#16241A; --cizgi:#2A3A2E; --kirmizi:#E5766B;
+    --girdi:#1A281E; --btn-yazi:#0C1610;
   }
   *{box-sizing:border-box}
   body{
@@ -123,6 +144,12 @@
     padding:8px 12px;font:600 13px 'IBM Plex Sans',sans-serif;color:var(--ikincil);cursor:pointer;white-space:nowrap}
   .filtre-btn:hover{color:var(--murekkep);border-color:var(--murekkep)}
   .filtre-btn.aktif{background:var(--murekkep);color:var(--btn-yazi);border-color:var(--murekkep)}
+  .tema-secenekler{display:flex;flex-wrap:wrap;gap:10px}
+  .tema-kutu{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:6px;
+    border:2px solid transparent;cursor:pointer;min-width:110px}
+  .tema-kutu.aktif{border-color:var(--murekkep)}
+  .tema-nokta{width:14px;height:14px;border-radius:50%;flex:none}
+  .tema-ad{font:600 13px 'IBM Plex Sans',sans-serif}
   .yil-btn{margin-left:auto;background:var(--yuzey);border:1px solid var(--cizgi);
     border-radius:3px;padding:7px 12px;font:600 13px 'IBM Plex Sans',sans-serif;
     color:var(--murekkep);cursor:pointer}
@@ -236,7 +263,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v2.4</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v2.5</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -330,6 +357,11 @@
     <div class="modal-bas">
       <span class="ay-ad">Ayarlar</span>
       <button class="modal-kapat" id="ayarKapat" aria-label="Kapat">×</button>
+    </div>
+
+    <div class="kart" style="margin-top:14px">
+      <h2 style="font-family:'Bricolage Grotesque',sans-serif;font-weight:500;font-size:15px;margin:0 0 12px">Tema</h2>
+      <div class="tema-secenekler" id="temaSecenekler"></div>
     </div>
 
     <div class="kart" style="margin-top:14px">
@@ -428,6 +460,7 @@ const katBul = id => aktifKategoriler.find(k => k.id === id)
 const AYLAR = ['Ocak','Şubat','Mart','Nisan','Mayıs','Haziran',
                'Temmuz','Ağustos','Eylül','Ekim','Kasım','Aralık'];
 const para = n => new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(n||0);
+const cssRenk = ad => getComputedStyle(document.body).getPropertyValue(ad).trim() || '#888';
 const bugun = () => new Date().toISOString().slice(0,10);
 const ayOf = t => t.slice(0,7);
 const ayKaydir = (a,adim) => { const [y,m]=a.split('-').map(Number);
@@ -953,9 +986,46 @@ function ayarlariAc(){
   kategoriPaneliCiz();
   limitPaneliCiz();
   sablonPaneliCiz();
+  temaSecenekleriCiz();
 }
 function ayarlariKapat(){
   document.getElementById('ayarModal').classList.remove('acik');
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TEMALAR
+   ═══════════════════════════════════════════════════════════════ */
+const TEMALAR = [
+  { id:'gece',    ad:'Gece',    kagit:'#0F1317', vurgu:'#8B7BC0' },
+  { id:'gunduz',  ad:'Gündüz',  kagit:'#EDEFF2', vurgu:'#6B4E9E' },
+  { id:'okyanus', ad:'Okyanus', kagit:'#0A1420', vurgu:'#4C93D4' },
+  { id:'kahve',   ad:'Kahve',   kagit:'#1A1410', vurgu:'#D19A63' },
+  { id:'orman',   ad:'Orman',   kagit:'#0C1610', vurgu:'#5FB07E' },
+];
+let aktifTema = 'gece';
+
+function temaUygula(ad){
+  aktifTema = ad;
+  if (ad === 'gece') document.body.removeAttribute('data-tema');
+  else document.body.setAttribute('data-tema', ad);
+  try { localStorage.setItem('butce:tema', ad); } catch {}
+  if (window.Chart) {
+    Chart.defaults.color = cssRenk('--ikincil');
+    Chart.defaults.borderColor = cssRenk('--cizgi');
+  }
+}
+
+function temaSecenekleriCiz(){
+  const el = document.getElementById('temaSecenekler');
+  if (!el) return;
+  el.innerHTML = TEMALAR.map(t => `
+    <button class="tema-kutu ${t.id === aktifTema ? 'aktif' : ''}" data-tema="${t.id}"
+      style="background:${t.kagit}">
+      <span class="tema-nokta" style="background:${t.vurgu}"></span>
+      <span class="tema-ad" style="color:${t.id==='gunduz'?'#16181D':'#E8EDF2'}">${t.ad}</span>
+    </button>`).join('');
+  el.querySelectorAll('.tema-kutu').forEach(b =>
+    b.onclick = () => { temaUygula(b.dataset.tema); temaSecenekleriCiz(); ciz(); });
 }
 
 function yilOzetiniCiz(){
@@ -999,7 +1069,7 @@ function yilOzetiniCiz(){
     yilGrafikChart = new Chart(document.getElementById('yilGrafik'), {
       type:'bar',
       data:{ labels: AYLAR.map(a => a.slice(0,3)),
-             datasets:[{ data: aylikGider, backgroundColor:'#E8EDF2', borderRadius:2 }] },
+             datasets:[{ data: aylikGider, backgroundColor:cssRenk('--murekkep'), borderRadius:2 }] },
       options:{ animation:false, plugins:{ legend:{display:false},
                   tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } },
                 scales:{ y:{ display:false }, x:{ grid:{display:false},
@@ -1243,7 +1313,7 @@ function ciz(){
     data:{ labels: aylar.map(a => AYLAR[+a.split('-')[1]-1].slice(0,3)),
            datasets:[{ data: aylar.map(a => kayitlar.filter(k=>ayOf(k.tarih)===a && (k.tur||'gider')==='gider')
                                  .reduce((t,k)=>t+k.tutar,0)),
-                       backgroundColor: aylar.map(a => a===ay ? '#E8EDF2' : '#3A434C'),
+                       backgroundColor: aylar.map(a => a===ay ? cssRenk('--murekkep') : cssRenk('--ikincil')),
                        borderRadius:2 }] },
     options:{ plugins:{ legend:{display:false},
                 tooltip:{ callbacks:{ label:c => ' ' + para(c.raw) } } },
@@ -1380,10 +1450,13 @@ document.getElementById('csv').onclick = () => {
 };
 document.getElementById('ayTemizle').onclick = ayiTemizle;
 
+// Kayıtlı temayı uygula (grafik renkleri için Chart varsayılanlarından önce).
+try { temaUygula(localStorage.getItem('butce:tema') || 'gece'); } catch { temaUygula('gece'); }
+
 // Grafik yazı/ızgara renkleri karanlık zeminde okunur olsun.
 if (window.Chart) {
-  Chart.defaults.color = '#8792A0';
-  Chart.defaults.borderColor = '#2A323A';
+  Chart.defaults.color = cssRenk('--ikincil');
+  Chart.defaults.borderColor = cssRenk('--cizgi');
 }
 baslat();
 </script>
