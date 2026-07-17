@@ -20,6 +20,9 @@
   v1.9  İçerik genişletildi (geniş ekranlarda kenar boşlukları azaldı)
   v2.0  4 sütunlu düzen: form, kategori dağılımı, son 6 ay, harcamalar yan yana
   v2.1  Düzen: sol form, orta harcamalar, sağda grafikler alt alta (3 sütun)
+  v2.2  "Bu ayı temizle" butonu (onaylı, o ayın tüm kayıtlarını siler)
+  v2.3  Kategori filtresi + elle sürükleyerek sıralama
+        NOT: harcamalar tablosuna sira alanı eklendi (alter table ... add column sira).
 -->
 <html lang="tr">
 <head>
@@ -111,6 +114,16 @@
   .arama-kutu:focus{outline:2px solid var(--murekkep);outline-offset:1px;background:var(--girdi)}
   .arama-sonuc{font:600 12px 'IBM Plex Mono',monospace;color:var(--ikincil);
     padding:4px 0 8px;border-bottom:1px solid var(--cizgi);margin-bottom:6px}
+  .filtre-cubuk{display:flex;gap:8px;margin-bottom:10px}
+  .filtre-sec{flex:1;padding:8px 10px;border:1px solid var(--cizgi);border-radius:3px;
+    background:var(--girdi);color:var(--murekkep);font:13px 'IBM Plex Sans',sans-serif}
+  .filtre-btn{background:var(--girdi);border:1px solid var(--cizgi);border-radius:3px;
+    padding:8px 12px;font:600 13px 'IBM Plex Sans',sans-serif;color:var(--ikincil);cursor:pointer;white-space:nowrap}
+  .filtre-btn:hover{color:var(--murekkep);border-color:var(--murekkep)}
+  .filtre-btn.aktif{background:var(--murekkep);color:var(--btn-yazi);border-color:var(--murekkep)}
+  .satir.suruklenebilir{cursor:grab}
+  .satir.suruklenen{opacity:.4}
+  .satir.suruklenebilir .tutamac{color:var(--ikincil);margin-right:2px;cursor:grab}
   .yil-btn{margin-left:auto;background:var(--yuzey);border:1px solid var(--cizgi);
     border-radius:3px;padding:7px 12px;font:600 13px 'IBM Plex Sans',sans-serif;
     color:var(--murekkep);cursor:pointer}
@@ -186,6 +199,7 @@
   .csv{background:none;border:1px solid var(--cizgi);border-radius:3px;padding:5px 10px;
     font:12px 'IBM Plex Sans',sans-serif;color:var(--ikincil);cursor:pointer}
   .csv:hover{color:var(--murekkep);border-color:var(--murekkep)}
+  .csv-tehlike:hover{color:var(--kirmizi);border-color:var(--kirmizi)}
 
   .gun{font-size:12px;color:var(--ikincil);margin:16px 0 6px}
   .satir{display:flex;align-items:center;gap:12px;padding:9px 0;border-top:1px solid var(--cizgi)}
@@ -223,7 +237,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v2.1</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v2.3</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -276,9 +290,16 @@
     <div class="kart">
       <div class="liste-bas">
         <h2 style="margin:0">Harcamalar</h2>
-        <button class="csv" id="csv">CSV indir</button>
+        <div style="display:flex;gap:8px">
+          <button class="csv" id="csv">CSV indir</button>
+          <button class="csv csv-tehlike" id="ayTemizle">Bu ayı temizle</button>
+        </div>
       </div>
       <input id="arama" class="arama-kutu" placeholder="Açıklama veya kategoride ara…" />
+      <div class="filtre-cubuk">
+        <select id="filtreKat" class="filtre-sec"></select>
+        <button class="filtre-btn" id="elleBtn" title="Elle sürükleyerek sırala">⇅ Elle sırala</button>
+      </div>
       <div id="liste"></div>
     </div>
 
@@ -423,6 +444,9 @@ let duzenlenenId = null;  // bir kaydı düzenliyorsak o kaydın id'si; yoksa nu
 let seciliTur = 'gider';  // formdaki gider/gelir seçimi
 let limitler = {};        // { toplam: 5000, market: 2000, ... }  — 'toplam' özel anahtar
 let arama = '';           // harcama listesinde arama metni
+let filtreKategori = 'hepsi';  // harcama listesi kategori filtresi
+let elleSirala = false;   // elle sürükleyerek sıralama modu açık mı
+let gorunenSirali = [];   // elle modda o an görünen sıralı kayıtlar (sürükleme için)
 let sablonlar = [];       // tekrarlayan işlemler: { id, ad, tutar, kategori, tur, gun }
 
 const bulutVar = () => !!(sb && kullanici);   // "kayıtlar bulutta mı?" sorusunun tek yanıtı
@@ -479,20 +503,26 @@ function yerelSablonYaz(v){
    ═══════════════════════════════════════════════════════════════ */
 async function bulutOku(){
   const { data, error } = await sb.from('harcamalar')
-    .select('id, tutar, kategori, aciklama, tarih, tur, sablon_id')
+    .select('id, tutar, kategori, aciklama, tarih, tur, sablon_id, sira')
     .order('tarih', { ascending:false });
   if (error) throw error;
-  return data.map(k => ({ ...k, tutar:Number(k.tutar), tur:k.tur || 'gider' }));
+  return data.map(k => ({ ...k, tutar:Number(k.tutar), tur:k.tur || 'gider',
+                          sira: k.sira == null ? null : Number(k.sira) }));
 }
 async function bulutEkle(kayit){
   // user_id'yi göndermiyoruz: tabloda default auth.uid() var, sunucu kendisi doldurur.
   const { data, error } = await sb.from('harcamalar')
     .insert({ tutar:kayit.tutar, kategori:kayit.kategori,
               aciklama:kayit.aciklama, tarih:kayit.tarih, tur:kayit.tur,
-              sablon_id:kayit.sablon_id || null })
+              sablon_id:kayit.sablon_id || null, sira:kayit.sira ?? null })
     .select().single();
   if (error) throw error;
-  return { ...data, tutar:Number(data.tutar), tur:data.tur || 'gider' };
+  return { ...data, tutar:Number(data.tutar), tur:data.tur || 'gider',
+           sira: data.sira == null ? null : Number(data.sira) };
+}
+async function bulutSiraGuncelle(id, sira){
+  const { error } = await sb.from('harcamalar').update({ sira }).eq('id', id);
+  if (error) throw error;
 }
 async function bulutSil(id){
   const { error } = await sb.from('harcamalar').delete().eq('id', id);
@@ -847,6 +877,16 @@ function kategoriSecicisiDoldur(){
     .map(k => `<option value="${k.id}">${k.ad}</option>`).join('');
   // Önceki seçim hâlâ varsa koru.
   if (aktifKategoriler.some(k => k.id === secili)) sel.value = secili;
+
+  // Harcama listesi kategori filtresi dropdown'ı.
+  const filtre = document.getElementById('filtreKat');
+  if (filtre) {
+    filtre.innerHTML = '<option value="hepsi">Tüm kategoriler</option>' +
+      aktifKategoriler.map(k => `<option value="${k.id}">${k.ad}</option>`).join('');
+    if (filtreKategori === 'hepsi' || aktifKategoriler.some(k => k.id === filtreKategori))
+      filtre.value = filtreKategori;
+    else { filtreKategori = 'hepsi'; filtre.value = 'hepsi'; }
+  }
 }
 
 /* Yönetim panelindeki kategori listesini çiz. */
@@ -1054,6 +1094,31 @@ async function sil(id){
   }
 }
 
+/* Görüntülenen ayın tüm kayıtlarını sil. */
+async function ayiTemizle(){
+  const ayKayitlari = kayitlar.filter(k => ayOf(k.tarih) === ay);
+  if (!ayKayitlari.length) return;
+  if (!confirm(`${ayEtiket(ay)} ayındaki ${ayKayitlari.length} kaydın tamamı silinecek. Bu geri alınamaz. Emin misin?`)) return;
+
+  formuTemizle();
+  const yedek = kayitlar;
+  kayitlar = kayitlar.filter(k => ayOf(k.tarih) !== ay);
+  ciz();
+
+  if (bulutVar()) {
+    try {
+      const sonrakiAy = ayKaydir(ay, 1);
+      const { error } = await sb.from('harcamalar').delete()
+        .gte('tarih', `${ay}-01`).lt('tarih', `${sonrakiAy}-01`);
+      if (error) throw error;
+    } catch {
+      kayitlar = yedek; ciz();   // silinemediyse geri koy
+    }
+  } else {
+    yerelYaz(kayitlar);
+  }
+}
+
 function göster(el, metin){ el.textContent = metin; el.hidden = false; }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1185,54 +1250,76 @@ function ciz(){
   // Liste
   const listeEl = document.getElementById('liste');
   document.getElementById('csv').hidden = !ayKayitlari.length;
+  document.getElementById('ayTemizle').hidden = !ayKayitlari.length;
 
-  // Arama filtresi: açıklama veya kategori adında geçenleri süz.
-  const q = arama.trim().toLocaleLowerCase('tr');
-  const listelenecek = q
-    ? ayKayitlari.filter(k => {
-        const kat = k.tur === 'gelir' ? 'gelir' : katBul(k.kategori).ad;
-        return (k.aciklama || '').toLocaleLowerCase('tr').includes(q)
-            || kat.toLocaleLowerCase('tr').includes(q);
-      })
-    : ayKayitlari;
+  // Filtre çubuğunun görünürlüğü: elle sıralama modunda arama/filtre gizli.
+  document.getElementById('arama').style.display = elleSirala ? 'none' : '';
+  document.getElementById('filtreKat').style.display = elleSirala ? 'none' : '';
+  document.getElementById('elleBtn').classList.toggle('aktif', elleSirala);
+  document.getElementById('elleBtn').hidden = !ayKayitlari.length;
 
   if (!ayKayitlari.length) {
     listeEl.innerHTML = `<div class="bos"><strong>${ayEtiket(ay)} için kayıt yok</strong>
       Soldaki formdan ilk harcamanı ekle.</div>`;
-    kategoriPaneliCiz();
-    limitPaneliCiz();
-    sablonPaneliCiz();
+    kategoriPaneliCiz(); limitPaneliCiz(); sablonPaneliCiz();
     return;
   }
-  if (q && !listelenecek.length) {
-    listeEl.innerHTML = `<div class="bos"><strong>"${arama}" için sonuç yok</strong>
-      Bu ay bu aramayla eşleşen kayıt bulunamadı.</div>`;
-    kategoriPaneliCiz();
-    limitPaneliCiz();
-    sablonPaneliCiz();
-    return;
-  }
-  const gruplar = {};
-  listelenecek.forEach(k => (gruplar[k.tarih] ||= []).push(k));
-  listeEl.innerHTML =
-    (q ? `<div class="arama-sonuc">${listelenecek.length} sonuç · toplam ${para(listelenecek.reduce((t,k)=>t+(k.tur==='gelir'?0:k.tutar),0))}</div>` : '') +
-    Object.entries(gruplar).map(([gun, satirlar]) => `
-    <div class="gun">${gunEtiket(gun)}</div>
-    ${satirlar.map(k => {
-      const gelir = k.tur === 'gelir';
-      const kat = katBul(k.kategori);
-      const renk = gelir ? '#2F7A4E' : kat.renk;
-      const altBaslik = gelir ? 'Gelir' : kat.ad;
-      const tutarMetin = (gelir ? '+' : '') + para(k.tutar);
-      return `
-      <div class="satir">
+
+  // Bir harcama satırının HTML'i (hem gruplu hem düz listede kullanılır).
+  const satirHtml = (k, suruklenebilir) => {
+    const gelir = k.tur === 'gelir';
+    const kat = katBul(k.kategori);
+    const renk = gelir ? '#2F7A4E' : kat.renk;
+    const altBaslik = gelir ? 'Gelir' : kat.ad;
+    const tutarMetin = (gelir ? '+' : '') + para(k.tutar);
+    return `
+      <div class="satir ${suruklenebilir ? 'suruklenebilir' : ''}" ${suruklenebilir ? `draggable="true" data-drag="${k.id}"` : ''}>
+        ${suruklenebilir ? '<span class="tutamac">⠿</span>' : ''}
         <span class="renk" style="background:${renk}"></span>
         <span class="ad"><strong>${k.aciklama || altBaslik}</strong><small>${altBaslik}</small></span>
         <span class="tutar ${gelir ? 'pozitif' : ''}">${tutarMetin}</span>
         <button class="duzenle" data-id="${k.id}" aria-label="Düzenle" title="Düzenle">✎</button>
         <button class="sil" data-id="${k.id}" aria-label="Sil" title="Sil">×</button>
-      </div>`; }).join('')}
-  `).join('');
+      </div>`;
+  };
+
+  if (elleSirala) {
+    // ── Elle sıralama modu: düz, sürüklenebilir liste ──
+    gorunenSirali = elleSiralanmis(ayKayitlari);
+    listeEl.innerHTML =
+      `<div class="arama-sonuc">Satırları sürükleyip bırakarak sırala</div>` +
+      gorunenSirali.map(k => satirHtml(k, true)).join('');
+    surukleBaglantilariniKur();
+  } else {
+    // ── Normal mod: arama + kategori filtresi, günlere gruplu ──
+    const q = arama.trim().toLocaleLowerCase('tr');
+    let listelenecek = ayKayitlari;
+    if (filtreKategori !== 'hepsi')
+      listelenecek = listelenecek.filter(k => k.kategori === filtreKategori && k.tur !== 'gelir');
+    if (q)
+      listelenecek = listelenecek.filter(k => {
+        const kat = k.tur === 'gelir' ? 'gelir' : katBul(k.kategori).ad;
+        return (k.aciklama || '').toLocaleLowerCase('tr').includes(q)
+            || kat.toLocaleLowerCase('tr').includes(q);
+      });
+
+    const filtreVar = q || filtreKategori !== 'hepsi';
+    if (filtreVar && !listelenecek.length) {
+      listeEl.innerHTML = `<div class="bos"><strong>Sonuç yok</strong>
+        Bu ay bu filtreyle eşleşen kayıt bulunamadı.</div>`;
+      kategoriPaneliCiz(); limitPaneliCiz(); sablonPaneliCiz();
+      return;
+    }
+
+    const gruplar = {};
+    listelenecek.forEach(k => (gruplar[k.tarih] ||= []).push(k));
+    listeEl.innerHTML =
+      (filtreVar ? `<div class="arama-sonuc">${listelenecek.length} sonuç · toplam ${para(listelenecek.reduce((t,k)=>t+(k.tur==='gelir'?0:k.tutar),0))}</div>` : '') +
+      Object.entries(gruplar).map(([gun, satirlar]) => `
+        <div class="gun">${gunEtiket(gun)}</div>
+        ${satirlar.map(k => satirHtml(k, false)).join('')}
+      `).join('');
+  }
 
   listeEl.querySelectorAll('.sil').forEach(b => b.onclick = () => sil(b.dataset.id));
   listeEl.querySelectorAll('.duzenle').forEach(b => b.onclick = () => duzenle(b.dataset.id));
@@ -1240,6 +1327,54 @@ function ciz(){
   kategoriPaneliCiz();
   limitPaneliCiz();
   sablonPaneliCiz();
+}
+
+/* Elle sıralama: sira'sı olanlar önce (sira'ya göre), olmayanlar tarih (yeni üstte). */
+function elleSiralanmis(liste){
+  return [...liste].sort((a,b) => {
+    const sa = a.sira, sbv = b.sira;
+    if (sa != null && sbv != null) return sa - sbv;
+    if (sa != null) return -1;
+    if (sbv != null) return 1;
+    return b.tarih.localeCompare(a.tarih);
+  });
+}
+
+/* Sürükle-bırak bağlantıları. */
+let suruklenenId = null;
+function surukleBaglantilariniKur(){
+  document.querySelectorAll('.satir[data-drag]').forEach(el => {
+    el.addEventListener('dragstart', () => { suruklenenId = el.dataset.drag; el.classList.add('suruklenen'); });
+    el.addEventListener('dragend', () => el.classList.remove('suruklenen'));
+    el.addEventListener('dragover', e => e.preventDefault());
+    el.addEventListener('drop', e => { e.preventDefault(); birak(el.dataset.drag); });
+  });
+}
+
+async function birak(hedefId){
+  if (!suruklenenId || suruklenenId === hedefId) return;
+  const sira = gorunenSirali.map(k => k.id);
+  const kaynak = sira.indexOf(suruklenenId);
+  const hedef = sira.indexOf(hedefId);
+  if (kaynak < 0 || hedef < 0) return;
+  sira.splice(hedef, 0, sira.splice(kaynak, 1)[0]);   // taşı
+
+  // Yeni sıra numaralarını kayıtlara işle.
+  sira.forEach((id, i) => {
+    const k = kayitlar.find(x => x.id === id);
+    if (k) k.sira = i;
+  });
+  suruklenenId = null;
+  ciz();
+
+  // Kaydet.
+  if (bulutVar()) {
+    for (let i = 0; i < sira.length; i++) {
+      try { await bulutSiraGuncelle(sira[i], i); } catch {}
+    }
+  } else {
+    yerelYaz(kayitlar);
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1256,6 +1391,8 @@ document.getElementById('sabEkleBtn').onclick = sablonEkle;
 document.getElementById('geri').onclick  = () => { ay = ayKaydir(ay,-1); ciz(); };
 document.getElementById('ileri').onclick = () => { ay = ayKaydir(ay, 1); ciz(); };
 document.getElementById('arama').addEventListener('input', e => { arama = e.target.value; ciz(); });
+document.getElementById('filtreKat').addEventListener('change', e => { filtreKategori = e.target.value; ciz(); });
+document.getElementById('elleBtn').onclick = () => { elleSirala = !elleSirala; ciz(); };
 document.getElementById('yilOzetBtn').onclick = yilOzetiniAc;
 document.getElementById('ayarBtn').onclick = ayarlariAc;
 document.getElementById('ayarKapat').onclick = ayarlariKapat;
@@ -1284,6 +1421,7 @@ document.getElementById('csv').onclick = () => {
   a.download = `harcamalar-${ay}.csv`;
   a.click();
 };
+document.getElementById('ayTemizle').onclick = ayiTemizle;
 
 // Grafik yazı/ızgara renkleri karanlık zeminde okunur olsun.
 if (window.Chart) {
