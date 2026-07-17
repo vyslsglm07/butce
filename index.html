@@ -16,6 +16,8 @@
   v1.6  Karanlık tema: tüm arayüz gece moduna çevrildi
   v1.7  Tekrarlayan işlemler (kira, maaş): her ay otomatik oluşturma
         NOT: harcamalar tablosuna sablon_id eklendi + "sablonlar" tablosu oluşturuldu.
+  v1.8  Kategoriler/limitler/tekrarlayanlar Ayarlar penceresine taşındı (sayfa kısaldı)
+  v1.9  İçerik genişletildi (geniş ekranlarda kenar boşlukları azaldı)
 -->
 <html lang="tr">
 <head>
@@ -41,7 +43,7 @@
     font-family:'IBM Plex Sans',system-ui,sans-serif; -webkit-font-smoothing:antialiased;
     padding:24px 18px 60px;
   }
-  .govde{max-width:980px;margin:0 auto}
+  .govde{max-width:1240px;margin:0 auto}
   .tutar{font-family:'IBM Plex Mono',monospace;font-variant-numeric:tabular-nums}
   .etiket{font-family:'IBM Plex Mono',monospace;font-size:11px;letter-spacing:.12em;
     text-transform:uppercase;color:var(--ikincil)}
@@ -132,7 +134,7 @@
   .anahtar span{display:flex;align-items:center;gap:6px}
   .nokta{width:8px;height:8px;border-radius:2px;display:inline-block}
 
-  .izgara{display:grid;grid-template-columns:330px 1fr;gap:18px;align-items:start;margin-top:26px}
+  .izgara{display:grid;grid-template-columns:380px 1fr;gap:20px;align-items:start;margin-top:26px}
   @media(max-width:820px){.izgara{grid-template-columns:1fr}}
 
   .kart{background:var(--yuzey);border:1px solid var(--cizgi);border-radius:4px;padding:18px}
@@ -217,7 +219,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v1.7</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v1.9</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -228,6 +230,7 @@
     <button class="ok" id="ileri" aria-label="Sonraki ay">→</button>
     <span class="ay-ad" id="ayAd"></span>
     <button class="yil-btn" id="yilOzetBtn">Yıl özeti</button>
+    <button class="yil-btn" id="ayarBtn" style="margin-left:8px">⚙ Ayarlar</button>
   </div>
 
   <div class="etiket">Bu ay harcanan</div>
@@ -271,54 +274,6 @@
         <h2>Son 6 ay</h2>
         <canvas id="trendGrafik" height="150"></canvas>
       </div>
-
-      <div class="kart">
-        <details>
-          <summary class="kat-baslik">Kategorileri yönet</summary>
-          <div id="katListe" class="kat-liste"></div>
-          <div class="kat-ekle">
-            <input id="katAd" placeholder="Yeni kategori adı" />
-            <input id="katRenk" type="color" value="#2F7A4E" title="Renk seç" />
-            <button class="btn" id="katEkleBtn" style="width:auto;padding:9px 14px">Ekle</button>
-          </div>
-        </details>
-      </div>
-
-      <div class="kart">
-        <details>
-          <summary class="kat-baslik">Bütçe limitleri</summary>
-          <p class="limit-not">Boş bırakırsan limit yok. Limit aştığında uyarı gösterilir.</p>
-          <div id="limitListe" class="kat-liste"></div>
-        </details>
-      </div>
-
-      <div class="kart">
-        <details>
-          <summary class="kat-baslik">Tekrarlayan işlemler</summary>
-          <p class="limit-not">Kira, maaş gibi her ay tekrar edenler. Bir kez tanımla, her ay otomatik eklensin.</p>
-          <div id="sablonListe" class="kat-liste"></div>
-          <div class="sablon-form">
-            <input id="sabAd" placeholder="Ad (örn. Kira)" />
-            <div class="sablon-satir">
-              <input id="sabTutar" inputmode="decimal" placeholder="Tutar" />
-              <select id="sabTur">
-                <option value="gider">Gider</option>
-                <option value="gelir">Gelir</option>
-              </select>
-            </div>
-            <div class="sablon-satir">
-              <select id="sabKategori"></select>
-              <div class="sablon-gun">
-                <span>Ayın</span>
-                <input id="sabGun" type="number" min="1" max="31" value="1" />
-                <span>günü</span>
-              </div>
-            </div>
-            <button class="btn" id="sabEkleBtn">Tekrarlayan işlem ekle</button>
-            <p class="hata" id="sabHata" hidden></p>
-          </div>
-        </details>
-      </div>
     </div>
 
     <div>
@@ -338,6 +293,64 @@
         <input id="arama" class="arama-kutu" placeholder="Açıklama veya kategoride ara…" />
         <div id="liste"></div>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- Ayarlar penceresi -->
+<div class="modal-katman" id="ayarModal">
+  <div class="modal">
+    <div class="modal-bas">
+      <span class="ay-ad">Ayarlar</span>
+      <button class="modal-kapat" id="ayarKapat" aria-label="Kapat">×</button>
+    </div>
+
+    <div class="kart" style="margin-top:14px">
+      <details open>
+        <summary class="kat-baslik">Kategorileri yönet</summary>
+        <div id="katListe" class="kat-liste"></div>
+        <div class="kat-ekle">
+          <input id="katAd" placeholder="Yeni kategori adı" />
+          <input id="katRenk" type="color" value="#2F7A4E" title="Renk seç" />
+          <button class="btn" id="katEkleBtn" style="width:auto;padding:9px 14px">Ekle</button>
+        </div>
+      </details>
+    </div>
+
+    <div class="kart" style="margin-top:14px">
+      <details>
+        <summary class="kat-baslik">Bütçe limitleri</summary>
+        <p class="limit-not">Boş bırakırsan limit yok. Limit aştığında uyarı gösterilir.</p>
+        <div id="limitListe" class="kat-liste"></div>
+      </details>
+    </div>
+
+    <div class="kart" style="margin-top:14px">
+      <details>
+        <summary class="kat-baslik">Tekrarlayan işlemler</summary>
+        <p class="limit-not">Kira, maaş gibi her ay tekrar edenler. Bir kez tanımla, her ay otomatik eklensin.</p>
+        <div id="sablonListe" class="kat-liste"></div>
+        <div class="sablon-form">
+          <input id="sabAd" placeholder="Ad (örn. Kira)" />
+          <div class="sablon-satir">
+            <input id="sabTutar" inputmode="decimal" placeholder="Tutar" />
+            <select id="sabTur">
+              <option value="gider">Gider</option>
+              <option value="gelir">Gelir</option>
+            </select>
+          </div>
+          <div class="sablon-satir">
+            <select id="sabKategori"></select>
+            <div class="sablon-gun">
+              <span>Ayın</span>
+              <input id="sabGun" type="number" min="1" max="31" value="1" />
+              <span>günü</span>
+            </div>
+          </div>
+          <button class="btn" id="sabEkleBtn">Tekrarlayan işlem ekle</button>
+          <p class="hata" id="sabHata" hidden></p>
+        </div>
+      </details>
     </div>
   </div>
 </div>
@@ -889,6 +902,17 @@ function yilOzetiniKapat(){
   document.getElementById('yilModal').classList.remove('acik');
 }
 
+/* Ayarlar penceresi. */
+function ayarlariAc(){
+  document.getElementById('ayarModal').classList.add('acik');
+  kategoriPaneliCiz();
+  limitPaneliCiz();
+  sablonPaneliCiz();
+}
+function ayarlariKapat(){
+  document.getElementById('ayarModal').classList.remove('acik');
+}
+
 function yilOzetiniCiz(){
   const yil = String(seciliYil);
   const yilKayitlari = kayitlar.filter(k => (k.tarih || '').slice(0,4) === yil);
@@ -1231,6 +1255,11 @@ document.getElementById('geri').onclick  = () => { ay = ayKaydir(ay,-1); ciz(); 
 document.getElementById('ileri').onclick = () => { ay = ayKaydir(ay, 1); ciz(); };
 document.getElementById('arama').addEventListener('input', e => { arama = e.target.value; ciz(); });
 document.getElementById('yilOzetBtn').onclick = yilOzetiniAc;
+document.getElementById('ayarBtn').onclick = ayarlariAc;
+document.getElementById('ayarKapat').onclick = ayarlariKapat;
+document.getElementById('ayarModal').addEventListener('click', e => {
+  if (e.target.id === 'ayarModal') ayarlariKapat();
+});
 document.getElementById('yilKapat').onclick = yilOzetiniKapat;
 document.getElementById('yilGeri').onclick = () => { seciliYil--; yilOzetiniCiz(); };
 document.getElementById('yilIleri').onclick = () => { seciliYil++; yilOzetiniCiz(); };
