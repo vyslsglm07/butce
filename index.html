@@ -14,6 +14,8 @@
         v1.5.1  Yıl özeti penceresi boş görünme hatası düzeltildi
         v1.5.2  Yıl özeti penceresi kapatma (×) hatası düzeltildi
   v1.6  Karanlık tema: tüm arayüz gece moduna çevrildi
+  v1.7  Tekrarlayan işlemler (kira, maaş): her ay otomatik oluşturma
+        NOT: harcamalar tablosuna sablon_id eklendi + "sablonlar" tablosu oluşturuldu.
 -->
 <html lang="tr">
 <head>
@@ -89,6 +91,16 @@
   .limit-input:focus{outline:2px solid var(--murekkep);outline-offset:1px;background:var(--girdi)}
   .limit-para{color:var(--ikincil);font-size:13px}
   .limit-etiket{color:var(--ikincil);font-size:11px}
+  .sablon-form{margin-top:10px}
+  .sablon-form > input, .sablon-form select, .sablon-satir input{width:100%;box-sizing:border-box;
+    padding:9px 10px;border:1px solid var(--cizgi);border-radius:3px;background:var(--girdi);
+    font:14px 'IBM Plex Sans',sans-serif;color:var(--murekkep)}
+  .sablon-form > input{margin-bottom:8px}
+  .sablon-satir{display:flex;gap:8px;margin-bottom:8px}
+  .sablon-satir > *{flex:1}
+  .sablon-gun{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ikincil)}
+  .sablon-gun input{width:56px;flex:none;text-align:center}
+  .sablon-form .btn{margin-top:4px}
   .arama-kutu{width:100%;box-sizing:border-box;padding:9px 10px;margin-bottom:8px;
     border:1px solid var(--cizgi);border-radius:3px;background:var(--girdi);
     font:14px 'IBM Plex Sans',sans-serif;color:var(--murekkep)}
@@ -205,7 +217,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v1.6</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v1.7</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -277,6 +289,34 @@
           <summary class="kat-baslik">Bütçe limitleri</summary>
           <p class="limit-not">Boş bırakırsan limit yok. Limit aştığında uyarı gösterilir.</p>
           <div id="limitListe" class="kat-liste"></div>
+        </details>
+      </div>
+
+      <div class="kart">
+        <details>
+          <summary class="kat-baslik">Tekrarlayan işlemler</summary>
+          <p class="limit-not">Kira, maaş gibi her ay tekrar edenler. Bir kez tanımla, her ay otomatik eklensin.</p>
+          <div id="sablonListe" class="kat-liste"></div>
+          <div class="sablon-form">
+            <input id="sabAd" placeholder="Ad (örn. Kira)" />
+            <div class="sablon-satir">
+              <input id="sabTutar" inputmode="decimal" placeholder="Tutar" />
+              <select id="sabTur">
+                <option value="gider">Gider</option>
+                <option value="gelir">Gelir</option>
+              </select>
+            </div>
+            <div class="sablon-satir">
+              <select id="sabKategori"></select>
+              <div class="sablon-gun">
+                <span>Ayın</span>
+                <input id="sabGun" type="number" min="1" max="31" value="1" />
+                <span>günü</span>
+              </div>
+            </div>
+            <button class="btn" id="sabEkleBtn">Tekrarlayan işlem ekle</button>
+            <p class="hata" id="sabHata" hidden></p>
+          </div>
         </details>
       </div>
     </div>
@@ -368,6 +408,7 @@ let duzenlenenId = null;  // bir kaydı düzenliyorsak o kaydın id'si; yoksa nu
 let seciliTur = 'gider';  // formdaki gider/gelir seçimi
 let limitler = {};        // { toplam: 5000, market: 2000, ... }  — 'toplam' özel anahtar
 let arama = '';           // harcama listesinde arama metni
+let sablonlar = [];       // tekrarlayan işlemler: { id, ad, tutar, kategori, tur, gun }
 
 const bulutVar = () => !!(sb && kullanici);   // "kayıtlar bulutta mı?" sorusunun tek yanıtı
 
@@ -406,6 +447,16 @@ function yerelLimitYaz(v){
   try { localStorage.setItem(YEREL_LIMIT_ANAHTAR, JSON.stringify(v)); } catch {}
 }
 
+/* Yerel şablon depo (tekrarlayan işlemler). */
+const YEREL_SABLON_ANAHTAR = 'butce:sablonlar';
+function yerelSablonOku(){
+  try { return JSON.parse(localStorage.getItem(YEREL_SABLON_ANAHTAR)) || []; }
+  catch { return []; }
+}
+function yerelSablonYaz(v){
+  try { localStorage.setItem(YEREL_SABLON_ANAHTAR, JSON.stringify(v)); } catch {}
+}
+
 /* ═══════════════════════════════════════════════════════════════
    4) BULUT DEPO — Supabase
    Tablo: harcamalar (SQL en altta, yorum içinde)
@@ -413,7 +464,7 @@ function yerelLimitYaz(v){
    ═══════════════════════════════════════════════════════════════ */
 async function bulutOku(){
   const { data, error } = await sb.from('harcamalar')
-    .select('id, tutar, kategori, aciklama, tarih, tur')
+    .select('id, tutar, kategori, aciklama, tarih, tur, sablon_id')
     .order('tarih', { ascending:false });
   if (error) throw error;
   return data.map(k => ({ ...k, tutar:Number(k.tutar), tur:k.tur || 'gider' }));
@@ -422,7 +473,8 @@ async function bulutEkle(kayit){
   // user_id'yi göndermiyoruz: tabloda default auth.uid() var, sunucu kendisi doldurur.
   const { data, error } = await sb.from('harcamalar')
     .insert({ tutar:kayit.tutar, kategori:kayit.kategori,
-              aciklama:kayit.aciklama, tarih:kayit.tarih, tur:kayit.tur })
+              aciklama:kayit.aciklama, tarih:kayit.tarih, tur:kayit.tur,
+              sablon_id:kayit.sablon_id || null })
     .select().single();
   if (error) throw error;
   return { ...data, tutar:Number(data.tutar), tur:data.tur || 'gider' };
@@ -475,6 +527,23 @@ async function bulutLimitSil(kategori){
   if (error) throw error;
 }
 
+/* Bulut şablon işlemleri. */
+async function bulutSablonOku(){
+  const { data, error } = await sb.from('sablonlar')
+    .select('id, ad, tutar, kategori, tur, gun').order('created_at', { ascending:true });
+  if (error) throw error;
+  return data.map(s => ({ ...s, tutar:Number(s.tutar), gun:Number(s.gun) }));
+}
+async function bulutSablonEkle(s){
+  const { error } = await sb.from('sablonlar')
+    .insert({ id:s.id, ad:s.ad, tutar:s.tutar, kategori:s.kategori, tur:s.tur, gun:s.gun });
+  if (error) throw error;
+}
+async function bulutSablonSil(id){
+  const { error } = await sb.from('sablonlar').delete().eq('id', id);
+  if (error) throw error;
+}
+
 /* Kategorileri yükle. Bulutta hiç kategori yoksa (ilk kez), o anki yerel
    kategorileri (varsayılanlar + kullanıcının eklediği) buluta taşı. */
 async function kategorileriYukle(){
@@ -497,6 +566,116 @@ async function limitleriYukle(){
     try { limitler = await bulutLimitOku(); } catch { limitler = {}; }
   } else {
     limitler = yerelLimitOku();
+  }
+}
+
+/* Şablonları yükle. */
+async function sablonlariYukle(){
+  if (bulutVar()) {
+    try { sablonlar = await bulutSablonOku(); } catch { sablonlar = []; }
+  } else {
+    sablonlar = yerelSablonOku();
+  }
+}
+
+/* Tekrarlayan işlemleri içinde bulunulan aya uygula:
+   o ay için bir şablonun kaydı yoksa otomatik oluştur. */
+async function sablonlariUygula(){
+  if (!sablonlar.length) return;
+  const buAy = ayOf(bugun());
+  const [yil, ayNo] = buAy.split('-').map(Number);
+  const sonGun = new Date(yil, ayNo, 0).getDate();   // ayın son günü
+
+  for (const s of sablonlar) {
+    const zatenVar = kayitlar.some(k => k.sablon_id === s.id && ayOf(k.tarih) === buAy);
+    if (zatenVar) continue;
+    const gun = Math.min(s.gun || 1, sonGun);
+    const kayit = {
+      id: crypto.randomUUID(),
+      tutar: s.tutar,
+      kategori: s.kategori,
+      aciklama: s.ad || '',
+      tarih: `${buAy}-${String(gun).padStart(2,'0')}`,
+      tur: s.tur || 'gider',
+      sablon_id: s.id,
+    };
+    kayitlar.push(kayit);
+    if (bulutVar()) { try { await bulutEkle(kayit); } catch {} }
+  }
+  if (!bulutVar()) yerelYaz(kayitlar);
+}
+
+async function sablonEkle(){
+  const ad = document.getElementById('sabAd').value.trim();
+  const tutarHam = document.getElementById('sabTutar').value;
+  const tutar = parseFloat(String(tutarHam).replace(/\./g,'').replace(',','.'));
+  const gun = parseInt(document.getElementById('sabGun').value, 10);
+  const hataEl = document.getElementById('sabHata');
+
+  if (!tutar || tutar <= 0) { hataEl.textContent = 'Geçerli bir tutar gir.'; hataEl.hidden = false; return; }
+  if (!gun || gun < 1 || gun > 31) { hataEl.textContent = 'Gün 1–31 arası olmalı.'; hataEl.hidden = false; return; }
+  hataEl.hidden = true;
+
+  const s = {
+    id: crypto.randomUUID(),
+    ad,
+    tutar: Math.round(tutar*100)/100,
+    kategori: document.getElementById('sabKategori').value,
+    tur: document.getElementById('sabTur').value,
+    gun,
+  };
+  sablonlar.push(s);
+  if (bulutVar()) {
+    try { await bulutSablonEkle(s); }
+    catch { sablonlar = sablonlar.filter(x => x.id !== s.id); return; }
+  } else {
+    yerelSablonYaz(sablonlar);
+  }
+
+  document.getElementById('sabAd').value = '';
+  document.getElementById('sabTutar').value = '';
+  await sablonlariUygula();   // yeni şablonu bu aya hemen uygula
+  sablonPaneliCiz();
+  ciz();
+}
+
+async function sablonSil(id){
+  if (!confirm('Bu tekrarlayan işlemi silmek istediğine emin misin? (Oluşmuş kayıtlar silinmez.)')) return;
+  const yedek = sablonlar;
+  sablonlar = sablonlar.filter(s => s.id !== id);
+  if (bulutVar()) {
+    try { await bulutSablonSil(id); }
+    catch { sablonlar = yedek; return; }
+  } else {
+    yerelSablonYaz(sablonlar);
+  }
+  sablonPaneliCiz();
+}
+
+/* Şablon yönetim panelini çiz. */
+function sablonPaneliCiz(){
+  const el = document.getElementById('sablonListe');
+  if (!el) return;
+  el.innerHTML = sablonlar.length
+    ? sablonlar.map(s => {
+        const kat = katBul(s.kategori);
+        const gelir = s.tur === 'gelir';
+        return `<div class="kat-satir">
+          <span class="nokta" style="background:${gelir ? '#2F7A4E' : kat.renk}"></span>
+          <span class="kat-ad">${s.ad || (gelir ? 'Gelir' : kat.ad)}
+            <small style="color:var(--ikincil)"> · her ayın ${s.gun}'i · ${para(s.tutar)}</small></span>
+          <button class="kat-sil" data-id="${s.id}" aria-label="Sil" title="Sil">×</button>
+        </div>`;
+      }).join('')
+    : '<div class="bos" style="padding:12px">Henüz tekrarlayan işlem yok.</div>';
+  el.querySelectorAll('.kat-sil').forEach(b => b.onclick = () => sablonSil(b.dataset.id));
+
+  // Kategori seçicisini güncel kategorilerle doldur.
+  const sel = document.getElementById('sabKategori');
+  if (sel) {
+    const secili = sel.value;
+    sel.innerHTML = aktifKategoriler.map(k => `<option value="${k.id}">${k.ad}</option>`).join('');
+    if (aktifKategoriler.some(k => k.id === secili)) sel.value = secili;
   }
 }
 
@@ -551,10 +730,14 @@ async function baslat(){
         await kategorileriYukle();
         await limitleriYukle();
         kayitlar = await bulutOku();
+        await sablonlariYukle();
+        await sablonlariUygula();
       } else {
         await kategorileriYukle();
         await limitleriYukle();
         kayitlar = yerelOku();
+        await sablonlariYukle();
+        await sablonlariUygula();
       }
       kategoriSecicisiDoldur();
       ciz();
@@ -565,11 +748,15 @@ async function baslat(){
     await kategorileriYukle();
     await limitleriYukle();
     kayitlar = kullanici ? await bulutOku() : yerelOku();
+    await sablonlariYukle();
+    await sablonlariUygula();
   } else {
     // Supabase bilgileri doldurulmamış → program yerel modda çalışır.
     await kategorileriYukle();
     await limitleriYukle();
     kayitlar = yerelOku();
+    await sablonlariYukle();
+    await sablonlariUygula();
   }
   kategoriSecicisiDoldur();
   ciz();
@@ -595,6 +782,7 @@ async function ekle(){
     aciklama: document.getElementById('aciklama').value.trim(),
     tarih: t,
     tur: seciliTur,
+    sablon_id: null,
   };
 
   if (duzenlenenId) {
@@ -987,6 +1175,7 @@ function ciz(){
       Soldaki formdan ilk harcamanı ekle.</div>`;
     kategoriPaneliCiz();
     limitPaneliCiz();
+    sablonPaneliCiz();
     return;
   }
   if (q && !listelenecek.length) {
@@ -994,6 +1183,7 @@ function ciz(){
       Bu ay bu aramayla eşleşen kayıt bulunamadı.</div>`;
     kategoriPaneliCiz();
     limitPaneliCiz();
+    sablonPaneliCiz();
     return;
   }
   const gruplar = {};
@@ -1023,6 +1213,7 @@ function ciz(){
 
   kategoriPaneliCiz();
   limitPaneliCiz();
+  sablonPaneliCiz();
 }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -1035,6 +1226,7 @@ document.getElementById('turGider').onclick = () => turSec('gider');
 document.getElementById('turGelir').onclick = () => turSec('gelir');
 document.getElementById('katEkleBtn').onclick = kategoriEkle;
 document.getElementById('katAd').addEventListener('keydown', e => e.key==='Enter' && kategoriEkle());
+document.getElementById('sabEkleBtn').onclick = sablonEkle;
 document.getElementById('geri').onclick  = () => { ay = ayKaydir(ay,-1); ciz(); };
 document.getElementById('ileri').onclick = () => { ay = ayKaydir(ay, 1); ciz(); };
 document.getElementById('arama').addEventListener('input', e => { arama = e.target.value; ciz(); });
@@ -1122,6 +1314,25 @@ create policy "kendi limitlerini gorur"   on limitler for select using (auth.uid
 create policy "kendi limitini ekler"      on limitler for insert with check (auth.uid() = user_id);
 create policy "kendi limitini siler"      on limitler for delete using (auth.uid() = user_id);
 create policy "kendi limitini gunceller"  on limitler for update using (auth.uid() = user_id);
+
+-- ─── v1.7: TEKRARLAYAN İŞLEMLER ───
+alter table harcamalar add column sablon_id text default null;
+create table sablonlar (
+  user_id uuid not null default auth.uid() references auth.users on delete cascade,
+  id text not null,
+  ad text default '',
+  tutar numeric not null,
+  kategori text not null,
+  tur text not null default 'gider',
+  gun int not null default 1,
+  created_at timestamp default now(),
+  primary key (user_id, id)
+);
+alter table sablonlar enable row level security;
+create policy "kendi sablonlarini gorur"   on sablonlar for select using (auth.uid() = user_id);
+create policy "kendi sablonunu ekler"      on sablonlar for insert with check (auth.uid() = user_id);
+create policy "kendi sablonunu siler"      on sablonlar for delete using (auth.uid() = user_id);
+create policy "kendi sablonunu gunceller"  on sablonlar for update using (auth.uid() = user_id);
 -->
 </body>
 </html>
