@@ -26,6 +26,8 @@
         v2.3.1  Sürükleme taşıma/kaydetme hatası düzeltildi
   v2.4  Elle sıralama kaldırıldı; yerine hazır sıralama (tarih/tutar, artan/azalan)
   v2.5  Tema seçimi: Gece, Gündüz, Okyanus, Kahve, Orman (Ayarlar'da)
+        v2.5.1  Tema renkleri daha canlı ve kontrastlı yapıldı
+  v2.6  Temalar sadeleşti: Gece, Gündüz, Prestij (altın vurgulu premium tema)
 -->
 <html lang="tr">
 <head>
@@ -41,30 +43,29 @@
   @import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,800&family=IBM+Plex+Mono:wght@400;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap');
 
   :root{
-    --murekkep:#E8EDF2; --ikincil:#8792A0; --kagit:#0F1317;
-    --yuzey:#171D24; --cizgi:#2A323A; --kirmizi:#E56B64;
-    --girdi:#1E252C; --btn-yazi:#0F1317;
+    --murekkep:#F0F3F7; --ikincil:#8B94A3; --kagit:#0D0F14;
+    --yuzey:#171A21; --cizgi:#282D37; --kirmizi:#F0655D;
+    --girdi:#1C2028; --btn-yazi:#0D0F14;
   }
   body[data-tema="gunduz"]{
-    --murekkep:#16181D; --ikincil:#6B7280; --kagit:#EDEFF2;
-    --yuzey:#FFFFFF; --cizgi:#DDE1E6; --kirmizi:#B03A2E;
-    --girdi:#FBFCFD; --btn-yazi:#FFFFFF;
+    --murekkep:#1A1D24; --ikincil:#666E7A; --kagit:#F4F6F9;
+    --yuzey:#FFFFFF; --cizgi:#E2E6EC; --kirmizi:#D64545;
+    --girdi:#FFFFFF; --btn-yazi:#FFFFFF;
   }
-  body[data-tema="okyanus"]{
-    --murekkep:#E0EAF5; --ikincil:#7D91A8; --kagit:#0A1420;
-    --yuzey:#122234; --cizgi:#243851; --kirmizi:#E8746B;
-    --girdi:#16283C; --btn-yazi:#0A1420;
+  body[data-tema="prestij"]{
+    --murekkep:#EFE9DC; --ikincil:#9C917C; --kagit:#0C0B09;
+    --yuzey:#15130F; --cizgi:#2A2620; --kirmizi:#E0857A;
+    --girdi:#1A1712; --btn-yazi:#0C0B09;
   }
-  body[data-tema="kahve"]{
-    --murekkep:#F0E8DE; --ikincil:#A89684; --kagit:#1A1410;
-    --yuzey:#26201A; --cizgi:#3A322A; --kirmizi:#E08A6A;
-    --girdi:#2A2420; --btn-yazi:#1A1410;
-  }
-  body[data-tema="orman"]{
-    --murekkep:#E4EEE4; --ikincil:#88A088; --kagit:#0C1610;
-    --yuzey:#16241A; --cizgi:#2A3A2E; --kirmizi:#E5766B;
-    --girdi:#1A281E; --btn-yazi:#0C1610;
-  }
+  /* Prestij: altın vurgu dokunuşları */
+  body[data-tema="prestij"] .buyuk{color:#D4AF6A}
+  body[data-tema="prestij"] .marka{color:#D4AF6A}
+  body[data-tema="prestij"] .kart h2,
+  body[data-tema="prestij"] .kat-baslik,
+  body[data-tema="prestij"] .ay-ad{color:#D4AF6A}
+  body[data-tema="prestij"] .btn{background:#D4AF6A;color:#0C0B09}
+  body[data-tema="prestij"] .btn:hover{background:#E4C384}
+  body[data-tema="prestij"] .tur-btn.aktif:not([data-tur="gelir"]){background:#D4AF6A;border-color:#D4AF6A;color:#0C0B09}
   *{box-sizing:border-box}
   body{
     margin:0; background:var(--kagit); color:var(--murekkep);
@@ -263,7 +264,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v2.5</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v2.6</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -996,15 +997,14 @@ function ayarlariKapat(){
    TEMALAR
    ═══════════════════════════════════════════════════════════════ */
 const TEMALAR = [
-  { id:'gece',    ad:'Gece',    kagit:'#0F1317', vurgu:'#8B7BC0' },
-  { id:'gunduz',  ad:'Gündüz',  kagit:'#EDEFF2', vurgu:'#6B4E9E' },
-  { id:'okyanus', ad:'Okyanus', kagit:'#0A1420', vurgu:'#4C93D4' },
-  { id:'kahve',   ad:'Kahve',   kagit:'#1A1410', vurgu:'#D19A63' },
-  { id:'orman',   ad:'Orman',   kagit:'#0C1610', vurgu:'#5FB07E' },
+  { id:'gece',    ad:'Gece',    kagit:'#0D0F14', vurgu:'#9B7EDE' },
+  { id:'gunduz',  ad:'Gündüz',  kagit:'#F4F6F9', vurgu:'#7C3AED' },
+  { id:'prestij', ad:'Prestij', kagit:'#0C0B09', vurgu:'#D4AF6A' },
 ];
 let aktifTema = 'gece';
 
 function temaUygula(ad){
+  if (!TEMALAR.some(t => t.id === ad)) ad = 'gece';   // kaldırılmış tema → gece
   aktifTema = ad;
   if (ad === 'gece') document.body.removeAttribute('data-tema');
   else document.body.setAttribute('data-tema', ad);
