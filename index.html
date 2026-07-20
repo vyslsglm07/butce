@@ -28,6 +28,7 @@
   v2.5  Tema seçimi: Gece, Gündüz, Okyanus, Kahve, Orman (Ayarlar'da)
         v2.5.1  Tema renkleri daha canlı ve kontrastlı yapıldı
   v2.6  Temalar sadeleşti: Gece, Gündüz, Prestij (altın vurgulu premium tema)
+  v2.7  Bugün ödemeleri hatırlatma kutusu + kaydettikten sonra "✓ Kaydedildi" onayı
 -->
 <html lang="tr">
 <head>
@@ -216,6 +217,7 @@
   .btn{width:100%;padding:11px;border:none;border-radius:3px;background:var(--murekkep);
     color:var(--btn-yazi);cursor:pointer;font:600 14px 'IBM Plex Sans',sans-serif}
   .btn:hover{background:#fff}
+  .btn.kaydedildi{background:#2F7A4E;color:#fff}
   .btn-vazgec{width:100%;padding:10px;margin-top:8px;border:1px solid var(--cizgi);
     border-radius:3px;background:var(--yuzey);color:var(--ikincil);cursor:pointer;
     font:500 13px 'IBM Plex Sans',sans-serif}
@@ -243,6 +245,18 @@
   .duzenle:hover{color:var(--murekkep)}
 
   .bos{text-align:center;padding:34px 12px;color:var(--ikincil);font-size:14px}
+  .hero-satir{display:flex;justify-content:space-between;align-items:flex-start;gap:20px}
+  .hero-sol{flex:none}
+  .hatirlatma{flex:1;max-width:420px;background:var(--yuzey);border:1px solid var(--cizgi);
+    border-radius:6px;padding:14px 16px;margin-top:4px}
+  .hatirlatma-bas{display:flex;align-items:center;gap:7px;font:600 13px 'IBM Plex Sans',sans-serif;
+    color:var(--murekkep);margin-bottom:10px}
+  .hatirlatma-satir{display:flex;align-items:center;gap:8px;padding:6px 0;
+    border-top:1px solid var(--cizgi);font-size:13px}
+  .hatirlatma-satir:first-of-type{border-top:none}
+  .hatirlatma-satir .ad2{flex:1}
+  .hatirlatma-satir .tut{font-family:'IBM Plex Mono',monospace;font-weight:600}
+  @media(max-width:760px){.hero-satir{flex-direction:column}.hatirlatma{max-width:none;width:100%}}
   .bos strong{display:block;color:var(--murekkep);margin-bottom:4px;font-size:15px}
   .grafikler{display:block}
   #halkaListe{margin-top:14px}
@@ -264,7 +278,7 @@
   </script>
 
   <div class="ust">
-    <div class="marka">Bütçe Defteri <span class="surum">v2.6</span></div>
+    <div class="marka">Bütçe Defteri <span class="surum">v2.7</span></div>
     <div class="oturum" id="oturum"></div>
   </div>
 
@@ -278,9 +292,14 @@
     <button class="yil-btn" id="ayarBtn" style="margin-left:8px">⚙ Ayarlar</button>
   </div>
 
-  <div class="etiket">Bu ay harcanan</div>
-  <p class="buyuk" id="toplam">₺0,00</p>
-  <div class="alt-bilgi" id="ozet"></div>
+  <div class="hero-satir">
+    <div class="hero-sol">
+      <div class="etiket">Bu ay harcanan</div>
+      <p class="buyuk" id="toplam">₺0,00</p>
+      <div class="alt-bilgi" id="ozet"></div>
+    </div>
+    <div class="hatirlatma" id="hatirlatma" hidden></div>
+  </div>
   <div class="limit-cubuk" id="limitUyari" hidden></div>
 
   <div class="serit" id="serit"></div>
@@ -734,6 +753,31 @@ async function sablonSil(id){
   sablonPaneliCiz();
 }
 
+/* Bugün (ayın günü) ödemesi olan tekrarlayan işlemleri hatırlat. */
+function hatirlatmaCiz(){
+  const el = document.getElementById('hatirlatma');
+  if (!el) return;
+  const buGun = new Date().getDate();
+  const bugunku = sablonlar.filter(s => (s.gun || 1) === buGun);
+  if (!bugunku.length) { el.hidden = true; return; }
+
+  el.hidden = false;
+  const toplam = bugunku.reduce((t,s) => t + (s.tur==='gelir' ? 0 : s.tutar), 0);
+  el.innerHTML =
+    `<div class="hatirlatma-bas">🔔 Bugün ödemelerin (${bugunku.length})</div>` +
+    bugunku.map(s => {
+      const kat = katBul(s.kategori);
+      const gelir = s.tur === 'gelir';
+      return `<div class="hatirlatma-satir">
+        <span class="nokta" style="background:${gelir?'#2F7A4E':kat.renk}"></span>
+        <span class="ad2">${s.ad || (gelir?'Gelir':kat.ad)}</span>
+        <span class="tut ${gelir?'pozitif':''}">${(gelir?'+':'')+para(s.tutar)}</span>
+      </div>`;
+    }).join('') +
+    (bugunku.filter(s=>s.tur!=='gelir').length > 1 ? `<div class="hatirlatma-satir" style="color:var(--ikincil)">
+      <span class="ad2">Bugünkü ödeme toplamı</span><span class="tut">${para(toplam)}</span></div>` : '');
+}
+
 /* Şablon yönetim panelini çiz. */
 function sablonPaneliCiz(){
   const el = document.getElementById('sablonListe');
@@ -889,9 +933,26 @@ async function ekle(){
     }
   }
 
+  const guncelleme = !!duzenlenenId;
   formuTemizle();
   ay = ayOf(t);
   ciz();
+  kaydedildiBildir(guncelleme ? 'Güncellendi' : 'Kaydedildi');
+}
+
+/* Kaydet butonunda kısa bir onay göster. */
+let bildirZaman = null;
+function kaydedildiBildir(metin){
+  const btn = document.getElementById('ekle');
+  if (!btn) return;
+  const eski = btn.textContent;
+  btn.textContent = '✓ ' + metin;
+  btn.classList.add('kaydedildi');
+  clearTimeout(bildirZaman);
+  bildirZaman = setTimeout(() => {
+    btn.classList.remove('kaydedildi');
+    btn.textContent = eski;   // "Kaydet"e geri dön
+  }, 1400);
 }
 
 /* Gider/gelir seçicisini ayarla. */
@@ -1200,6 +1261,7 @@ function göster(el, metin){ el.textContent = metin; el.hidden = false; }
 let halka, trend;
 
 function ciz(){
+  hatirlatmaCiz();
   const ayKayitlari = kayitlar.filter(k => ayOf(k.tarih) === ay)
     .sort((a,b) => b.tarih.localeCompare(a.tarih));
   // Gider ve gelir ayrı hesaplanır. Grafikler ve şerit yalnızca gideri gösterir.
